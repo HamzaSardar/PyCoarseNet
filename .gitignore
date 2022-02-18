@@ -2,6 +2,6 @@
 /.idea
 /__pycache__/
 /pycoarsenet/__pycache__/
-/pycoarsenet/preprocessing/__pycache__/
+/pycoarsenet/data/__pycache__/
 /pycoarsenet/training/__pycache__/
 tmp_*
