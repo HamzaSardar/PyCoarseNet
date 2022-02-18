@@ -13,10 +13,3 @@ if __name__ == '__main__':
                              fine_size=100,
                              Dimensionless='Pe')
 
-    net = Network(n_epochs=500,
-                  learning_rate=1e-2,
-                  optimiser=torch.optim.Adam,
-                  layers=[nn.Linear(dataset.num_features, 10),
-                          nn.Tanh(),
-                          nn.Linear(10, 1)])
-    net.train()
