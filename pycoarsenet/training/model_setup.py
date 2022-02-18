@@ -7,35 +7,51 @@ from functools import partial
 from pycoarsenet.data.initialise_data import InitialiseData
 
 
-class Network:
+class Network(nn.Module):
     def __init__(self,
                  n_epochs: int,
-                 loss_fn: object = nn.MSELoss(),
-                 optimiser: object = torch.optim.SGD,
-                 learning_rate: float = 1e-2,
-                 layers: List[Any]):
-        """
+                 layers: List[int],
+                 loss_fn: nn.Module = nn.MSELoss(),
+                 optimiser: torch.optim.Optimizer = torch.optim.SGD,
+                 activation_fn: nn.Module = nn.Tanh(),
+                 learning_rate: float = 1e-2):
+        """Instantiates Neural Network.
 
         Parameters
         ----------
-        layers : object
+        n_epochs:
+            Number of epochs.
+        layers:
+            List containing number of neurons per layer.
+        loss_fn
+        optimiser
+        activation_fn
+        learning_rate
         """
+        super().__init__()
         self.n_epochs = n_epochs
         self.loss_fn = loss_fn
-        self.layers = layers
-        _optimiser = partial(optimiser)
+        self.activation = activation_fn
         self.learning_rate = learning_rate
-        self.model = nn.Sequential(*self.layers)
-        self.optimiser = _optimiser(self.model.parameters(), lr=self.learning_rate)
+        self.optimiser = optimiser(self.model.parameters(), lr=self.learning_rate)
 
+        model_layers: List[nn.Module] = []
+        for i in range(len(layers)):
+            if i + 1 != len(layers):
+                model_layers.append(nn.Linear(layers[i], layers[i+1]))
+                model_layers.append(self.activation)
+            else:
+                model_layers.append(nn.Linear(layers[i], layers[i+1]))
+
+        self.model = nn.Sequential(*model_layers)
         self.train_losses = []
         self.val_losses = []
 
-    def train(self):
+    def train(self, **kwargs):
         for epoch in range(self.n_epochs):
+            self.model.train()
             train_features = dataset.features[dataset.train_indices, :]
             train_targets = dataset.targets[dataset.train_indices, :]
-            train_size = train_features[0].shape
 
             train_model_outputs = self.model(train_features.float())
             train_loss = self.loss_fn(train_model_outputs, train_targets.float())
@@ -45,15 +61,14 @@ class Network:
             train_loss.backward()
             self.optimiser.step()
 
-            with torch.no_grad():
-                val_features = dataset.features[dataset.val_indices, :]
-                val_targets = dataset.targets[dataset.val_indices, :]
-                val_size = train_features[0].shape
+            self.model.eval()
+            val_features = dataset.features[dataset.val_indices, :]
+            val_targets = dataset.targets[dataset.val_indices, :]
 
-                val_model_outputs = self.model(val_features.float())
-                val_loss = self.loss_fn(val_model_outputs, val_targets.float())
+            val_model_outputs = self.model(val_features.float())
+            val_loss = self.loss_fn(val_model_outputs, val_targets.float())
 
-                self.val_losses.append(val_loss)
+            self.val_losses.append(val_loss)
 
     def plot(self, fig_path: str):
         x_axis = torch.linspace(1, self.n_epochs, self.n_epochs)
