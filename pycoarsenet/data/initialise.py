@@ -22,11 +22,7 @@ def generate_cell_Pe(data: torch.Tensor,
     cell_Pe:
         Tensor containing Peclet values.
     """
-    values_dict = {}
-    for i in values:
-        values_dict[i] = (cg_spacing * torch.ones(data[i].shape[0])) / i
-    cell_Pe = torch.cat([tensor for tensor in values_dict.values()], dim=0).unsqueeze(-1)
-    return cell_Pe
+    return torch.cat(([(cg_spacing * torch.ones(data[i].shape[0]) / i) for i in values]), dim=0).unsqueeze(-1)
 
 
 def downsampling(coarse_size: int, fine_size: int, data_fine: torch.Tensor) -> torch.Tensor:
@@ -49,21 +45,25 @@ def downsampling(coarse_size: int, fine_size: int, data_fine: torch.Tensor) -> t
     """
     downsampling_ratio = int(fine_size / coarse_size)
 
-    if isinstance(downsampling_ratio, int) and downsampling_ratio % 2 == 1:
-        sampling_indices = torch.linspace(int(int(downsampling_ratio / 2) + 1),
-                                          fine_size - int(downsampling_ratio / 2),
-                                          steps=coarse_size)
-        sampling_bools = torch.zeros((fine_size, fine_size), dtype=torch.bool)
-        for i in range(1, fine_size + 1):
-            for j in range(1, fine_size + 1):
-                if i in sampling_indices and j in sampling_indices:
-                    sampling_bools[i - 1, j - 1] = True
-    else:
-        raise ValueError('Fine and Coarse grids incompatible with selected downsampling.')
+    if downsampling_ratio % 2 == 0:
+        raise ValueError('Fine and Coarse grid size incompatible with downsampling.')
 
-    return einops.rearrange(data_fine[:, :, sampling_bools],
-                            'simulation variable (row column) -> simulation variable row column',
-                            row=coarse_size)
+    sampling_indices = torch.linspace(int(int(downsampling_ratio / 2) + 1),
+                                      fine_size - int(downsampling_ratio / 2),
+                                      steps=coarse_size)
+
+    sampling_bools = torch.zeros((fine_size, fine_size), dtype=torch.bool)
+    for i in range(1, fine_size + 1):
+        for j in range(1, fine_size + 1):
+            if i in sampling_indices and j in sampling_indices:
+                sampling_bools[i - 1, j - 1] = True
+
+    downsampled_data: torch.Tensor = einops.rearrange(
+        data_fine[:, :, sampling_bools],
+        'simulation variable (row column) -> simulation variable row column',
+        row=coarse_size)
+
+    return downsampled_data
 
 
 def extract_features(data: torch.Tensor, indices: Tuple) -> torch.Tensor:
@@ -71,7 +71,7 @@ def extract_features(data: torch.Tensor, indices: Tuple) -> torch.Tensor:
     Parameters
     ----------
     data:
-        Raw input data.
+        Raw input data in form [Simulation, Variable, ...].
     indices:
         Indices selected for feature vector.
 
@@ -79,9 +79,7 @@ def extract_features(data: torch.Tensor, indices: Tuple) -> torch.Tensor:
     -------
     Tensor of features.
     """
-    if indices is None:
-        raise ValueError('Feature indices must be specified.')
-    return data[:, indices, :, :]
+    return data[:, indices, ...]
 
 
 def normalise(features: torch.Tensor, variable: int) -> torch.Tensor:
@@ -104,5 +102,5 @@ def normalise(features: torch.Tensor, variable: int) -> torch.Tensor:
     return features
 
 
-def training_val_split(n_samples : int, val_fraction : float):
+def training_val_split(n_samples: int, val_fraction: float):
     return n_val := int(val_fraction * n_samples)

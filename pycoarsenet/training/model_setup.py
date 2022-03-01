@@ -3,13 +3,10 @@ import torch.nn as nn
 import matplotlib.pyplot as plt
 
 from typing import List, Any, Dict
-from functools import partial
-from pycoarsenet.data.initialise_data import InitialiseData
 
 
 class Network(nn.Module):
     def __init__(self,
-                 n_epochs: int,
                  layers: List[int],
                  loss_fn: nn.Module = nn.MSELoss(),
                  optimiser: torch.optim.Optimizer = torch.optim.SGD,
@@ -19,8 +16,6 @@ class Network(nn.Module):
 
         Parameters
         ----------
-        n_epochs:
-            Number of epochs.
         layers:
             List containing number of neurons per layer.
         loss_fn
@@ -29,46 +24,39 @@ class Network(nn.Module):
         learning_rate
         """
         super().__init__()
-        self.n_epochs = n_epochs
         self.loss_fn = loss_fn
         self.activation = activation_fn
         self.learning_rate = learning_rate
         self.optimiser = optimiser(self.model.parameters(), lr=self.learning_rate)
+        self.model = nn.Sequential(*self._create_linear_layers(layers, self.activation))
+        self.train_losses = []
+        self.val_losses = []
 
+    @staticmethod
+    def _create_linear_layers(layers, activation) -> List[nn.Module]:
         model_layers: List[nn.Module] = []
         for i in range(len(layers)):
             if i + 1 != len(layers):
                 model_layers.append(nn.Linear(layers[i], layers[i+1]))
-                model_layers.append(self.activation)
+                model_layers.append(activation)
             else:
                 model_layers.append(nn.Linear(layers[i], layers[i+1]))
+        return model_layers
 
-        self.model = nn.Sequential(*model_layers)
-        self.train_losses = []
-        self.val_losses = []
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """ Perform a single forward pass.
 
-    def train(self, **kwargs):
-        for epoch in range(self.n_epochs):
-            self.model.train()
-            train_features = dataset.features[dataset.train_indices, :]
-            train_targets = dataset.targets[dataset.train_indices, :]
+        Parameters
+        ----------
+        x: torch.Tensor
+            Input feature vector.
 
-            train_model_outputs = self.model(train_features.float())
-            train_loss = self.loss_fn(train_model_outputs, train_targets.float())
-            self.train_losses.append(train_loss)
-
-            self.optimiser.zero_grad()
-            train_loss.backward()
-            self.optimiser.step()
-
-            self.model.eval()
-            val_features = dataset.features[dataset.val_indices, :]
-            val_targets = dataset.targets[dataset.val_indices, :]
-
-            val_model_outputs = self.model(val_features.float())
-            val_loss = self.loss_fn(val_model_outputs, val_targets.float())
-
-            self.val_losses.append(val_loss)
+        Returns
+        -------
+        Ouput: torch.Tensor
+        """
+        # TODO: Add dimensionality check before doing self.model(x).
+        return self.model(x)
 
     def plot(self, fig_path: str):
         x_axis = torch.linspace(1, self.n_epochs, self.n_epochs)
