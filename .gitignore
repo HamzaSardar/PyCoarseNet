@@ -4,4 +4,5 @@
 /pycoarsenet/__pycache__/
 /pycoarsenet/data/__pycache__/
 /pycoarsenet/training/__pycache__/
+/pycoarsenet/src/__pycache__/
 tmp_*
