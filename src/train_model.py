@@ -1,12 +1,12 @@
+from typing import List, Tuple, NoReturn
+
+import einops  # type: ignore
 import torch
 from torch import Tensor
 from torch.utils.data import DataLoader, Dataset
-import einops
-from typing import List, Tuple, NoReturn
 
 import pycoarsenet.data.initialise as initialise
 from pycoarsenet.training.model_setup import Network
-
 
 MODEL: Network = Network([7, 10, 1])
 N_EPOCHS: int = 500
@@ -37,9 +37,9 @@ def load_data(data_dir: str) -> Tuple[Tensor, Tensor]:
     data_fine_dict = {}
     for alpha in ALPHA_VALS:
         data_coarse_dict[alpha] = torch.load(
-         f'{data_dir}{alpha}_data_coarse.t')
+            f'{data_dir}{alpha}_data_coarse.t')
         data_fine_dict[alpha] = torch.load(
-         f'{data_dir}{alpha}_data_fine.t')
+            f'{data_dir}{alpha}_data_fine.t')
     data_coarse_raw = torch.cat(([*data_coarse_dict.values()]), dim=0)
     data_fine_raw = torch.cat(([*data_fine_dict.values()]), dim=0)
     return data_coarse_raw, data_fine_raw
@@ -73,7 +73,7 @@ def generate_features_labels(data_coarse: Tensor, data_fine: Tensor) -> Tensor:
     labels = einops.rearrange(delta_var,
                               'simulation row column -> (simulation row column)').unsqueeze(-1)
     features = initialise.extract_features(data_coarse, INDICES)
-    for i in features.shape[1]:
+    for i in features.shape[1]:  # type: ignore
         features = initialise.normalise(features, i)
     features = einops.rearrange(features,
                                 'simulation variable row column -> (simulation row column) variable',
@@ -104,7 +104,7 @@ def generate_dataloaders(features_labels: Tensor) -> Tuple[DataLoader, DataLoade
     return train_loader, val_loader
 
 
-def train(model: Network, train_loader: DataLoader, val_loader: DataLoader) -> NoReturn:
+def train(model: Network, train_loader: DataLoader, val_loader: DataLoader) -> NoReturn:  # type: ignore
     """ Training loop.
 
     Parameters
@@ -160,7 +160,7 @@ class SimulationDataset(Dataset):
             Feature vector for the given row, label for the given row.
         """
         self.data = data
-        self.length = data.shape[0]
+        self.length: int = data.shape[0]
 
     def __len__(self):
         return self.length
