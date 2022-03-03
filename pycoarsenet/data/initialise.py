@@ -1,8 +1,8 @@
-import torch
-import einops
-from torch.utils.data import random_split
-
 from typing import List, Tuple, Any
+
+import einops  # type: ignore
+import torch
+from torch.utils.data import random_split
 
 
 def generate_cell_Pe(data: torch.Tensor,
@@ -23,7 +23,7 @@ def generate_cell_Pe(data: torch.Tensor,
     cell_Pe:
         Tensor containing Peclet values.
     """
-    return torch.cat(([(cg_spacing * torch.ones(data[i].shape[0]) / i) for i in values]), dim=0).unsqueeze(-1)
+    return torch.cat(([(cg_spacing * torch.ones(data.shape[0]) / i) for i in values]), dim=0).unsqueeze(-1)
 
 
 def downsampling(coarse_size: int, fine_size: int, data_fine: torch.Tensor) -> torch.Tensor:
@@ -146,6 +146,6 @@ def training_val_split(data: torch.Tensor, frac_train: float) -> Tuple[Any, Any]
     if frac_train > 1:
         raise ValueError('Cannot split dataset. frac_train must be <=1')
     samples = torch.numel(data)
-    train, val = random_split(data, [int(frac_train * samples), samples - int(frac_train * samples)])
+    train, val = random_split(data, [int(frac_train * samples), samples - int(frac_train * samples)])  # type: ignore
 
     return train, val
