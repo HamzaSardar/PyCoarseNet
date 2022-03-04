@@ -1,5 +1,7 @@
 from typing import List, Tuple
+from pathlib import Path
 
+import csv
 import einops
 import torch
 import torch.nn as nn
@@ -10,26 +12,29 @@ import pycoarsenet.data.initialise as initialise
 from pycoarsenet.model import Network
 
 N_EPOCHS: int = 500
-LOSS_FN: nn.Module = nn.MSELOSS()
+LOSS_FN: nn.Module = nn.MSELoss()
 LEARNING_RATE: float = 1e-2
-# TODO: Use pathlib rather than explicit paths
-DATA_DIR: str = '/home/hamza/Projects/TorchFoam/Data/changing_alpha/'
+DATA_DIR: Path = Path('/home/hamza/Projects/TorchFoam/Data/changing_alpha/')
+RESULTS_DIR: Path = Path('/home/hamza/Projects/PyCoarseNet/results/')
 COARSE_SPACING: float = 0.05
 FINE_SIZE: int = 100
 COARSE_SIZE: int = 20
+
+# TODO: replace below with an enum
 INDICES: List[int] = [3, 4, 5, 7, 8, 10, 11, 16]
+
 ALPHA_VALS: List[float] = [0.001, 0.005, 0.01, 0.05]
 TRAINING_FRACTION: float = 0.8
 BATCH_SIZE: int = 32
 
 
-def load_data(data_dir: str) -> Tuple[Tensor, Tensor]:
+def load_data(data_dir: Path) -> Tuple[Tensor, Tensor]:
 
     """Loads data from data_dir.
 
     Parameters
     ----------
-    data_dir: str
+    data_dir: Path
         Absolute path to CFD results in torch.Tensor file format.
 
     Returns
@@ -117,7 +122,7 @@ def generate_dataloaders(features_labels: Tensor) -> Tuple[DataLoader, DataLoade
 
 
 def train(model: Network, train_loader: DataLoader, val_loader: DataLoader) -> None:
-    """ Training loop.
+    """ Training loop. Writes output to CSV file.
 
     Parameters
     ----------
@@ -128,30 +133,84 @@ def train(model: Network, train_loader: DataLoader, val_loader: DataLoader) -> N
     val_loader: DataLoader
         DataLoader containing validation data.
     """
-    # TODO: Add in epoch wise losses to address issue #6
-    # TODO: Check dans code for how to do this (normalised loss)
-    # TODO: Add some verbosity so it prints during training
 
+    # set Optimiser
     optimiser = torch.optim.SGD(model.parameters(), lr=LEARNING_RATE)
 
+    # detect device, work on GPU if available
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    model.to(device)
+
+    # prepare results file
+    with open(RESULTS_DIR / 'results.csv', 'w+', newline='') as f_out:
+        writer = csv.writer(f_out, delimiter=',')
+
+        writer.writerow([
+            'epoch',
+            'train_mse_loss',
+            'val_ms_loss'
+        ])
+
+    print('Training...')
+
+    # training loop
     for epoch in range(N_EPOCHS):
 
+        # reset epoch loss
+        train_mse_loss = 0.0
+        val_mse_loss = 0.0
+
+        # training step
         model.train()
         for feature_vector, label in train_loader:
 
-            # TODO: check dans code for switching to a GPU if present using `device`
+            # move data to GPU if available
+            feature_vector.to(device)
+            label.to(device)
 
-            batch_t_model_outputs = model(feature_vector)
+            batch_t_model_outputs = model.forward(feature_vector)
             batch_t_loss = LOSS_FN(batch_t_model_outputs, label)
+
+            # increment epoch loss by batch loss
+            # total batch loss = batch loss * number of values in batch
+            train_mse_loss += batch_t_loss * feature_vector.size(0)
 
             optimiser.zero_grad()
             batch_t_loss.backward()
             optimiser.step()
 
+        # validation step
         model.eval()
         for feature_vector, label in val_loader:
-            batch_v_model_outputs = model(feature_vector)
+
+            # move data to GPU if available
+            feature_vector.to(device)
+            label.to(device)
+
+            batch_v_model_outputs = model.forward(feature_vector)
             batch_v_loss = LOSS_FN(batch_v_model_outputs, label)
+
+            # increment epoch loss by batch loss
+            val_mse_loss += batch_v_loss * feature_vector.size(0)
+
+        # normalise loss by number of data points in DataLoader
+        train_mse_loss /= len(train_loader.dataset)                                                       # type: ignore
+        val_mse_loss /= len(val_loader.dataset)                                                           # type: ignore
+
+        # print epoch results
+        if epoch % 10 == 0:
+            print(f'Epoch: {epoch}, \n train_loss: {train_mse_loss:5f} \n val_loss: {val_mse_loss:5f} \n')
+
+        # log results in list
+        epoch_results = [epoch, train_mse_loss, val_mse_loss]
+
+        # open results file in append mode and write results as csv
+        with open(RESULTS_DIR / 'results.csv', 'a', newline='') as f_out:
+            writer = csv.writer(f_out, delimiter=',')
+            writer.writerow(epoch_results)
+
+    # end training loop
+    print('Training complete.')
 
 
 def main():
