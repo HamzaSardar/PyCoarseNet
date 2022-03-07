@@ -2,6 +2,7 @@
 /.idea
 /__pycache__/
 /.mypy_cache/
+/src/__pycache__/
 /results/
 /pycoarsenet/__pycache__/
 /pycoarsenet/data/__pycache__/
