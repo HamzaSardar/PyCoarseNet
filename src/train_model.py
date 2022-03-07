@@ -52,8 +52,8 @@ def load_data(data_dir: Path) -> Tuple[Tensor, Tensor]:
     data_fine_dict = OrderedDict()
 
     for alpha in ALPHA_VALS:
-        coarse_path = Path(data_dir / f'{alpha}_data_coarse.t')
-        fine_path = Path(data_dir / f'{alpha}_data_fine.t')
+        coarse_path = data_dir / f'{alpha}_data_coarse.t'
+        fine_path = data_dir / f'{alpha}_data_fine.t'
 
         data_coarse_dict[alpha] = torch.load(coarse_path)
         data_fine_dict[alpha] = torch.load(fine_path)
