@@ -1,18 +1,22 @@
-from typing import List, Tuple
-from pathlib import Path
-
 import csv
+import sys
+from collections import OrderedDict
+from pathlib import Path
+from typing import List, Tuple
+
 import einops
 import torch
 import torch.nn as nn
 from torch import Tensor
 from torch.utils.data import DataLoader, TensorDataset
 
+sys.path.append('..')
 import pycoarsenet.data.initialise as initialise
 from pycoarsenet.model import Network
 
+
+DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 N_EPOCHS: int = 500
-LOSS_FN: nn.Module = nn.MSELoss()
 LEARNING_RATE: float = 1e-2
 DATA_DIR: Path = Path('/home/hamza/Projects/TorchFoam/Data/changing_alpha/')
 RESULTS_DIR: Path = Path('/home/hamza/Projects/PyCoarseNet/results/')
@@ -21,7 +25,7 @@ FINE_SIZE: int = 100
 COARSE_SIZE: int = 20
 
 # TODO: replace below with an enum
-INDICES: List[int] = [3, 4, 5, 7, 8, 10, 11, 16]
+INDICES: List[int] = [3, 4, 5, 7, 8, 10, 11]
 
 ALPHA_VALS: List[float] = [0.001, 0.005, 0.01, 0.05]
 TRAINING_FRACTION: float = 0.8
@@ -29,7 +33,6 @@ BATCH_SIZE: int = 32
 
 
 def load_data(data_dir: Path) -> Tuple[Tensor, Tensor]:
-
     """Loads data from data_dir.
 
     Parameters
@@ -45,11 +48,15 @@ def load_data(data_dir: Path) -> Tuple[Tensor, Tensor]:
         Fine grid data from specified simulations.
     """
 
-    data_coarse_dict = {}
-    data_fine_dict = {}
+    data_coarse_dict = OrderedDict()
+    data_fine_dict = OrderedDict()
+
     for alpha in ALPHA_VALS:
-        data_coarse_dict[alpha] = torch.load(f'{data_dir}{alpha}_data_coarse.t')
-        data_fine_dict[alpha] = torch.load(f'{data_dir}{alpha}_data_fine.t')
+        coarse_path = Path(data_dir / f'{alpha}_data_coarse.t')
+        fine_path = Path(data_dir / f'{alpha}_data_fine.t')
+
+        data_coarse_dict[alpha] = torch.load(coarse_path)
+        data_fine_dict[alpha] = torch.load(fine_path)
 
     data_coarse_raw = torch.cat(([*data_coarse_dict.values()]), dim=0)
     data_fine_raw = torch.cat(([*data_fine_dict.values()]), dim=0)
@@ -58,7 +65,6 @@ def load_data(data_dir: Path) -> Tuple[Tensor, Tensor]:
 
 
 def generate_features_labels(data_coarse: Tensor, data_fine: Tensor) -> Tensor:
-
     """ Preprocess data and compile into one torch.Tensor.
 
     Parameters
@@ -77,23 +83,23 @@ def generate_features_labels(data_coarse: Tensor, data_fine: Tensor) -> Tensor:
     Pe = initialise.generate_cell_Pe(data_coarse, ALPHA_VALS, COARSE_SPACING)
     data_fine_ds = initialise.downsampling(COARSE_SIZE, FINE_SIZE, data_fine)
 
-    # TODO: Split extract_features such that data_fine_ds[Indices] is on the line before, then just pass in data
-
-    targets = initialise.extract_features(data_fine_ds, INDICES[:-1])
-    features_partial = initialise.extract_features(data_coarse, INDICES[:-1])
+    targets = data_fine_ds[:, INDICES, ...]
+    features_partial = data_coarse[:, INDICES, ...]
 
     # TODO: An enum on the line below would tell you that 0 represents T
 
     delta_var = targets[:, 0] - features_partial[:, 0]
-    labels = einops.rearrange(delta_var, 'sim i j -> (sim i j) 1')
-    features = initialise.extract_features(data_coarse, INDICES)
+    labels = delta_var.unsqueeze(-1)
+
+    # T at column 0, remove from features
+    features = features_partial[:, 1:]
 
     # TODO: Check vimnote
 
-    for i in features.shape[1]:  # type: ignore
+    for i in range(features.shape[1]):  # type: ignore
         features = initialise.normalise(features, i)
 
-    features = einops.rearrange(features, 'sim var i j -> (sim i j) variable 1', variable=features.shape[1])
+    # features = einops.rearrange(features, 'sim var i j -> (sim i j) var 1', var=features.shape[1])
     features_labels = torch.cat((features, Pe, labels), dim=-1)
 
     return features_labels
@@ -135,13 +141,16 @@ def train(model: Network, train_loader: DataLoader, val_loader: DataLoader) -> N
     """
 
     # set Optimiser
-    optimiser = torch.optim.SGD(model.parameters(), lr=LEARNING_RATE)
+    optimiser = torch.optim.Adam(model.parameters(), lr=LEARNING_RATE)
 
-    # detect device, work on GPU if available
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    model.to(device)
+    # set loss function
+    loss_fn: nn.Module = nn.MSELoss()
+
+    # work on global(DEVICE) - GPU if available
+    model.to(DEVICE)
 
     # prepare results file
+    RESULTS_DIR.mkdir(parents=True, exist_ok=False)
     with open(RESULTS_DIR / 'results.csv', 'w+', newline='') as f_out:
         writer = csv.writer(f_out, delimiter=',')
 
@@ -163,18 +172,19 @@ def train(model: Network, train_loader: DataLoader, val_loader: DataLoader) -> N
         # training step
         model.train()
         for feature_vector, label in train_loader:
-
             # move data to GPU if available
-            feature_vector.to(device)
-            label.to(device)
+            feature_vector = feature_vector.to(DEVICE)
+            label = label.to(DEVICE)
 
-            batch_t_model_outputs = model.forward(feature_vector)
-            batch_t_loss = LOSS_FN(batch_t_model_outputs, label)
+            batch_t_model_outputs = model.forward(feature_vector.float())
+            batch_t_loss = loss_fn(batch_t_model_outputs, label.float())
 
             # increment epoch loss by batch loss
             # total batch loss = batch loss * number of values in batch
-            train_mse_loss += batch_t_loss * feature_vector.size(0)
+            # .item() returns the value in a 1 element tensor as a number
+            train_mse_loss += batch_t_loss.item() * feature_vector.size(0)
 
+            # update the parameters
             optimiser.zero_grad()
             batch_t_loss.backward()
             optimiser.step()
@@ -182,20 +192,19 @@ def train(model: Network, train_loader: DataLoader, val_loader: DataLoader) -> N
         # validation step
         model.eval()
         for feature_vector, label in val_loader:
-
             # move data to GPU if available
-            feature_vector.to(device)
-            label.to(device)
+            feature_vector = feature_vector.to(DEVICE)
+            label = label.to(DEVICE)
 
-            batch_v_model_outputs = model.forward(feature_vector)
-            batch_v_loss = LOSS_FN(batch_v_model_outputs, label)
+            batch_v_model_outputs = model.forward(feature_vector.float())
+            batch_v_loss = loss_fn(batch_v_model_outputs, label.float())
 
             # increment epoch loss by batch loss
-            val_mse_loss += batch_v_loss * feature_vector.size(0)
+            val_mse_loss += batch_v_loss.item() * feature_vector.size(0)
 
         # normalise loss by number of data points in DataLoader
-        train_mse_loss /= len(train_loader.dataset)                                                       # type: ignore
-        val_mse_loss /= len(val_loader.dataset)                                                           # type: ignore
+        train_mse_loss /= len(train_loader.dataset)  # type: ignore
+        val_mse_loss /= len(val_loader.dataset)  # type: ignore
 
         # print epoch results
         if epoch % 10 == 0:

@@ -6,7 +6,6 @@ from torch.utils.data import random_split, TensorDataset, dataset
 
 
 def generate_cell_Pe(data: torch.Tensor, values: List[float], cg_spacing: float) -> torch.Tensor:
-
     """Generates a tensor of cell-centres Peclet values.
     Parameters
     ----------
@@ -24,11 +23,14 @@ def generate_cell_Pe(data: torch.Tensor, values: List[float], cg_spacing: float)
     """
 
     # Cell peclet number is delta_x / diffusivity
-    return torch.cat(([(cg_spacing * torch.ones(data.shape[0]) / i) for i in values]), dim=0).unsqueeze(-1)
+    num_var = data.shape[-1]
+    data = einops.rearrange(data, '(sim i j) var -> (i j) sim var', sim=len(values), var=num_var, i=int(1 / cg_spacing))
+    Pe_tensor = torch.cat(([(cg_spacing * torch.ones(data.shape[0]) / i) for i in values]), dim=0).unsqueeze(-1)
+
+    return Pe_tensor
 
 
 def downsampling(coarse_size: int, fine_size: int, data_fine: torch.Tensor) -> torch.Tensor:
-
     """Downsamples fine grid data by coarse grid cell centres.
     For this method, the ratio of fine grid to coarse grid data points must be an odd integer, >1.
     This method assumes a 2D domain.
@@ -47,8 +49,8 @@ def downsampling(coarse_size: int, fine_size: int, data_fine: torch.Tensor) -> t
     Downsampled fine grid data tensor, of shape = data_coarse.shape
     """
 
-    num_var = data_fine[-1]
-    data_fine = einops.rearrange(data_fine, '(s i j) v -> (s v) i j', v=data_fine[-1], i=fine_size, j=fine_size)
+    num_var = data_fine.shape[-1]
+    data_fine = einops.rearrange(data_fine, '(s i j) v -> (s v) i j', v=num_var, i=fine_size, j=fine_size)
     downsampling_ratio = int(fine_size / coarse_size)
 
     if downsampling_ratio % 2 == 0:
@@ -56,13 +58,12 @@ def downsampling(coarse_size: int, fine_size: int, data_fine: torch.Tensor) -> t
 
     sampling_bools = generate_sampling_points(downsampling_ratio, fine_size, coarse_size)
     sampled_data = data_fine[:, sampling_bools]
-    data_fine = einops.rearrange(sampled_data, '(s v) i j -> (s i j) v', v=num_var)
+    data_fine = einops.rearrange(sampled_data, '(s v) (i j) -> (s i j) v', v=num_var, i=coarse_size, j=coarse_size)
 
     return data_fine
 
 
 def generate_sampling_points(downsampling_ratio: int, fine_size: int, coarse_size: int) -> torch.Tensor:
-
     """ Generates a tensor of booleans at which to downsample fine grid data.
 
     Parameters
@@ -95,10 +96,10 @@ def generate_sampling_points(downsampling_ratio: int, fine_size: int, coarse_siz
 
     return sampling_bools
 
+
 # TODO: get rid of below, there's no need
 
 def extract_features(data: torch.Tensor, indices: List[int]) -> torch.Tensor:
-
     """
     Parameters
     ----------
@@ -114,6 +115,7 @@ def extract_features(data: torch.Tensor, indices: List[int]) -> torch.Tensor:
     """
 
     return data[:, indices, ...]
+
 
 # TODO: Below doesn't need to exist, just do it expliticitly
 
@@ -138,7 +140,6 @@ def normalise(features: torch.Tensor, variable: int) -> torch.Tensor:
 
 
 def training_val_split(data: TensorDataset, frac_train: float) -> Tuple[dataset.Subset, dataset.Subset]:
-
     """Generates indices for training validation split.
 
     Parameters

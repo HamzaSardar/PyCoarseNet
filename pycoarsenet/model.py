@@ -48,11 +48,11 @@ class Network(nn.Module):
         model_layers: List[nn.Module] = []
         for i in range(len(layers)):
             # checking if the next layer will be the final layer
-            if i + 1 != len(layers):
-                model_layers.append(nn.Linear(layers[i], layers[i + 1]))
-                model_layers.append(activation)
+            if i == len(layers) - 1:
+                model_layers.append(nn.Linear(layers[i], 1))
             else:
                 model_layers.append(nn.Linear(layers[i], layers[i + 1]))
+                model_layers.append(activation)
 
         return model_layers
 
