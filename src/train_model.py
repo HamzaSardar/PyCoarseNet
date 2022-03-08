@@ -4,16 +4,15 @@ from collections import OrderedDict
 from pathlib import Path
 from typing import List, Tuple
 
-import einops
 import torch
 import torch.nn as nn
+import wandb
 from torch import Tensor
 from torch.utils.data import DataLoader, TensorDataset
 
 sys.path.append('..')
 import pycoarsenet.data.initialise as initialise
 from pycoarsenet.model import Network
-
 
 DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 N_EPOCHS: int = 500
@@ -99,7 +98,6 @@ def generate_features_labels(data_coarse: Tensor, data_fine: Tensor) -> Tensor:
     for i in range(features.shape[1]):  # type: ignore
         features = initialise.normalise(features, i)
 
-    # features = einops.rearrange(features, 'sim var i j -> (sim i j) var 1', var=features.shape[1])
     features_labels = torch.cat((features, Pe, labels), dim=-1)
 
     return features_labels
@@ -210,7 +208,7 @@ def train(model: Network, train_loader: DataLoader, val_loader: DataLoader) -> N
         if epoch % 10 == 0:
             print(f'Epoch: {epoch}, \n train_loss: {train_mse_loss:5f} \n val_loss: {val_mse_loss:5f} \n')
 
-        # log results in list
+        # log results in list to write to csv
         epoch_results = [epoch, train_mse_loss, val_mse_loss]
 
         # open results file in append mode and write results as csv
@@ -218,11 +216,15 @@ def train(model: Network, train_loader: DataLoader, val_loader: DataLoader) -> N
             writer = csv.writer(f_out, delimiter=',')
             writer.writerow(epoch_results)
 
-    # end training loop
+        # log results to wandb
+        results_dict = {'epoch': epoch, 'train_mse_loss': train_mse_loss, 'val_mse_loss': val_mse_loss}
+        wandb.log(results_dict)
+
     print('Training complete.')
 
 
 def main():
+    wandb.init(project="cg-cfd", entity="hamzasardar")
     model: Network = Network([7, 10, 1])
     dc_raw, dc_fine = load_data(DATA_DIR)
     fl = generate_features_labels(dc_raw, dc_fine)
