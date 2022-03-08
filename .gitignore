@@ -9,4 +9,5 @@
 /pycoarsenet/training/__pycache__/
 /pycoarsenet/src/__pycache__/
 /pycoarsenet/postprocessing/__pycache__/
+/pycoarsenet/src/wandb/*
 tmp_*
