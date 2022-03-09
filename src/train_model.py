@@ -6,19 +6,25 @@ from typing import List, Tuple
 
 import torch
 import torch.nn as nn
+import numpy as np
 import wandb
 from torch import Tensor
 from torch.utils.data import DataLoader, TensorDataset
 
+import galilean_invariance
+
 sys.path.append('..')
 import pycoarsenet.data.initialise as initialise
 from pycoarsenet.model import Network
+from pycoarsenet.postprocessing import plots
 
 DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-N_EPOCHS: int = 500
-LEARNING_RATE: float = 1e-2
+INVARIANCE: bool = False
+N_EPOCHS: int = 100
+LEARNING_RATE: float = 0.001
 DATA_DIR: Path = Path('/home/hamza/Projects/TorchFoam/Data/changing_alpha/')
-RESULTS_DIR: Path = Path('/home/hamza/Projects/PyCoarseNet/results/')
+RESULTS_DIR: Path = Path('/home/hamza/Projects/PyCoarseNet/results/') / 'non-invariant features'
+                                                                        # / 'invariant_features'
 COARSE_SPACING: float = 0.05
 FINE_SIZE: int = 100
 COARSE_SIZE: int = 20
@@ -28,7 +34,10 @@ INDICES: List[int] = [3, 4, 5, 7, 8, 10, 11]
 
 ALPHA_VALS: List[float] = [0.001, 0.005, 0.01, 0.05]
 TRAINING_FRACTION: float = 0.8
-BATCH_SIZE: int = 32
+BATCH_SIZE: int = 1
+
+TRAIN_LOSSES: List[float] = []
+VAL_LOSSES: List[float] = []
 
 
 def load_data(data_dir: Path) -> Tuple[Tensor, Tensor]:
@@ -90,10 +99,20 @@ def generate_features_labels(data_coarse: Tensor, data_fine: Tensor) -> Tensor:
     delta_var = targets[:, 0] - features_partial[:, 0]
     labels = delta_var.unsqueeze(-1)
 
-    # T at column 0, remove from features
-    features = features_partial[:, 1:]
+    if INVARIANCE:
+        # T at column 0, remove from features
+        features_partial = features_partial[:, 1:]
 
-    # TODO: Check vimnote
+        # convert first derivatives to magnitude
+        d_mag = galilean_invariance.derivative_magnitude(features_partial[:, 2])
+
+        # convert second derivatives to eigenvalues
+        h_eigs = galilean_invariance.hessian_eigenvalues(features_partial[:, 2:])
+
+        # join d_mag and h_eigs to make features
+        features = torch.cat((d_mag, h_eigs), dim=-1)
+    else:
+        features = features_partial[:, 1:]
 
     for i in range(features.shape[1]):  # type: ignore
         features = initialise.normalise(features, i)
@@ -104,6 +123,7 @@ def generate_features_labels(data_coarse: Tensor, data_fine: Tensor) -> Tensor:
 
 
 def generate_dataloaders(features_labels: Tensor) -> Tuple[DataLoader, DataLoader]:
+
     """ Generate required DataLoaders from preprocessed data.
 
     Parameters
@@ -208,6 +228,10 @@ def train(model: Network, train_loader: DataLoader, val_loader: DataLoader) -> N
         if epoch % 10 == 0:
             print(f'Epoch: {epoch}, \n train_loss: {train_mse_loss:5f} \n val_loss: {val_mse_loss:5f} \n')
 
+        # add losses to global trackers
+        TRAIN_LOSSES.append(train_mse_loss)
+        VAL_LOSSES.append(val_mse_loss)
+
         # log results in list to write to csv
         epoch_results = [epoch, train_mse_loss, val_mse_loss]
 
@@ -218,18 +242,47 @@ def train(model: Network, train_loader: DataLoader, val_loader: DataLoader) -> N
 
         # log results to wandb
         results_dict = {'epoch': epoch, 'train_mse_loss': train_mse_loss, 'val_mse_loss': val_mse_loss}
-        wandb.log(results_dict)
+        # wandb.log(results_dict)
 
     print('Training complete.')
 
 
 def main():
-    wandb.init(project="cg-cfd", entity="hamzasardar")
+
+    # wandb.init(project="cg-cfd", entity="hamzasardar")
+
+    # initialise network, data, and run training
     model: Network = Network([7, 10, 1])
     dc_raw, dc_fine = load_data(DATA_DIR)
     fl = generate_features_labels(dc_raw, dc_fine)
     train_loader, val_loader = generate_dataloaders(fl)
     train(model, train_loader, val_loader)
+
+    # plotting loss history
+    plots.plot_loss_history(
+        fig_path=RESULTS_DIR,
+        n_epochs=N_EPOCHS,
+        train_losses=TRAIN_LOSSES,
+        val_losses=VAL_LOSSES,
+        loss_fn='MSE Loss',
+        experiment='Galilean Invariance - varying alpha'
+    )
+
+    # evaluate model on training data
+    model.eval()
+
+    model_predictions = model.forward(train_loader.dataset.dataset.tensors[0].float())
+    labels = train_loader.dataset.dataset.tensors[1]
+
+    np_model_predictions = model_predictions.detach().numpy()
+    np_labels = labels.detach().numpy()
+
+    # plotting model performance on training data
+    plots.plot_model_evaluation(
+        fig_path=RESULTS_DIR,
+        model_predictions=np_model_predictions,
+        actual_error=np_labels
+    )
 
 
 if __name__ == '__main__':

@@ -48,12 +48,11 @@ class Network(nn.Module):
         model_layers: List[nn.Module] = []
         for i in range(len(layers)):
             # checking if the next layer will be the final layer
-            if i == len(layers) - 1:
-                model_layers.append(nn.Linear(layers[i], 1))
-            else:
+            if i < len(layers) - 2:
                 model_layers.append(nn.Linear(layers[i], layers[i + 1]))
                 model_layers.append(activation)
-
+            elif i == len(layers) - 2:
+                model_layers.append(nn.Linear(layers[i], 1))
         return model_layers
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
