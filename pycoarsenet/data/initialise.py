@@ -97,26 +97,6 @@ def generate_sampling_points(downsampling_ratio: int, fine_size: int, coarse_siz
     return sampling_bools
 
 
-# TODO: get rid of below, there's no need
-
-def extract_features(data: torch.Tensor, indices: List[int]) -> torch.Tensor:
-    """
-    Parameters
-    ----------
-    data:
-        Raw input data in form [Simulation, Variable, ...].
-    indices:
-        Indices selected for feature vector.
-
-    Returns
-    -------
-    object
-    Tensor of features.
-    """
-
-    return data[:, indices, ...]
-
-
 # TODO: Below doesn't need to exist, just do it expliticitly
 
 def normalise(features: torch.Tensor, variable: int) -> torch.Tensor:
