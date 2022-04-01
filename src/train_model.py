@@ -16,18 +16,19 @@ import galilean_invariance
 sys.path.append('..')
 import pycoarsenet.data.initialise as initialise
 from pycoarsenet.model import Network
+from pycoarsenet.data.enums import eFeatures
 from pycoarsenet.postprocessing import plots
 
-
 DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-INVARIANCE: bool = True
-TENSOR_INVARIANTS: bool = True
+INVARIANCE: bool = False
+TENSOR_INVARIANTS: bool = False
 N_EPOCHS: int = 200
 LEARNING_RATE: float = 0.001
+EVALUATE: bool = True
 DATA_DIR: Path = Path('/home/hamza/Projects/TorchFoam/Data/changing_alpha/')
 EVAL_DIR: Path = Path('/home/hamza/Projects/TorchFoam/Data/changing_alpha/evaluation_flows/')
-RESULTS_DIR: Path = Path('/home/hamza/Projects/PyCoarseNet/results/') / 'invariant_features'
-                                                                        # / 'non-invariant features'
+RESULTS_DIR: Path = Path('/home/hamza/Projects/PyCoarseNet/results/') / '7_10x1_1'
+# / 'non-invariant features'
 COARSE_SPACING: float = 0.05
 FINE_SIZE: int = 100
 COARSE_SIZE: int = 20
@@ -36,7 +37,8 @@ COARSE_SIZE: int = 20
 INDICES: List[int] = [3, 4, 5, 7, 8, 10, 11]
 
 TRAINING_VALS: List[float] = [0.001, 0.005, 0.01, 0.05]
-EVAL_VALS: List[float] = [0.001, 0.005, 0.01, 0.05]
+#EVAL_VALS: List[float] = [0.001, 0.005, 0.01, 0.05]
+EVAL_VALS: List[float] = [0.0025, 0.0075, 0.025]
 
 TRAINING_FRACTION: float = 0.8
 BATCH_SIZE: int = 1
@@ -88,6 +90,9 @@ def load_data(data_dir: Path, mode: str) -> Tuple[Tensor, Tensor]:
         data_coarse_raw = torch.cat(([*data_coarse_dict.values()]), dim=0)
         data_fine_raw = torch.cat(([*data_fine_dict.values()]), dim=0)
 
+    else:
+        raise ValueError('Mode must be Training or Evaluation.')
+
     return data_coarse_raw, data_fine_raw
 
 
@@ -117,11 +122,26 @@ def generate_features_labels(data_coarse: Tensor, data_fine: Tensor, mode: str) 
 
     data_fine_ds = initialise.downsampling(COARSE_SIZE, FINE_SIZE, data_fine)
 
-    targets = data_fine_ds[:, INDICES, ...]
-    features_partial = data_coarse[:, INDICES, ...]
+    targets = data_fine_ds[:, [
+                                eFeatures.T.value,
+                                eFeatures.dT_dX.value,
+                                eFeatures.dT_dY.value,
+                                eFeatures.d2T_dXX.value,
+                                eFeatures.d2T_dXY.value,
+                                eFeatures.d2T_dYX.value,
+                                eFeatures.d2T_dYY.value
+                              ], ...]
+    features_partial = data_coarse[:, [
+                                eFeatures.T.value,
+                                eFeatures.dT_dX.value,
+                                eFeatures.dT_dY.value,
+                                eFeatures.d2T_dXX.value,
+                                eFeatures.d2T_dXY.value,
+                                eFeatures.d2T_dYX.value,
+                                eFeatures.d2T_dYY.value
+                              ], ...]
 
-    # TODO: An enum on the line below would tell you that 0 represents T
-
+    # T is first column in targets and features_partial
     delta_var = targets[:, 0] - features_partial[:, 0]
     labels = delta_var.unsqueeze(-1)
 
@@ -137,14 +157,23 @@ def generate_features_labels(data_coarse: Tensor, data_fine: Tensor, mode: str) 
 
         if TENSOR_INVARIANTS:
             # return tensor invariants
-            invar_1, invar_2 = galilean_invariance.hessian_invariants(features_partial[:, 2:])
+            invar_1, invar_2 = galilean_invariance.hessian_invariants(h_eigs)
 
-            #print(f'invar_1 shape: {invar_1.shape}, invar_2 shape: {invar_2.shape}')
-            # create feature vector
-            features = torch.cat((d_mag, h_eigs, invar_1.unsqueeze(-1), invar_2.unsqueeze(-1)), dim=-1)
+            """Experiment 1 features"""
+            features = torch.cat((d_mag,
+                                  invar_1.unsqueeze(-1),
+                                  invar_2.unsqueeze(-1)),
+                                  dim=-1
+                                 )
+
+            """Experiment 2 features"""
+            #features = torch.cat((d_mag, h_eigs), dim=-1)
+
         else:
             # join d_mag and h_eigs to make features
-            features = torch.cat((d_mag, h_eigs), dim=-1)
+            #features = torch.cat((features_partial[:, :2], h_eigs), dim=-1)
+            """Uncomment below for both derivatives to be invariant"""
+            # features = torch.cat((d_mag, h_eigs), dim=-1)
     else:
         features = features_partial[:, 1:]
 
@@ -158,7 +187,6 @@ def generate_features_labels(data_coarse: Tensor, data_fine: Tensor, mode: str) 
 
 
 def generate_dataloaders(features_labels: Tensor) -> Tuple[DataLoader, DataLoader]:
-
     """ Generate required DataLoaders from preprocessed data.
 
     Parameters
@@ -283,11 +311,10 @@ def train(model: Network, train_loader: DataLoader, val_loader: DataLoader) -> N
 
 
 def main():
-
     wandb.init(project="cg-cfd", entity="hamzasardar", )
 
-    # initialise network, data, and run training
-    model: Network = Network([6, 10, 10, 1])
+    # initialise network, load training data, and run training
+    model: Network = Network([7, 10, 10, 1], activation_fn=nn.Tanh())
     dc_raw, df_raw = load_data(DATA_DIR, 't')
     fl = generate_features_labels(dc_raw, df_raw, 't')
     train_loader, val_loader = generate_dataloaders(fl)
@@ -304,11 +331,13 @@ def main():
     )
 
     wandb.save('model.h5')
+    wandb.finish()
 
-    # evaluate model on training data
+    # Evaluation on training data
+
     model.eval()
 
-    model_predictions = model.forward(train_loader.dataset.dataset.tensors[0].float())
+    model_predictions = model.forward(val_loader.dataset.dataset.tensors[0].float())
     labels = train_loader.dataset.dataset.tensors[1]
 
     np_model_predictions = model_predictions.detach().numpy()
@@ -316,11 +345,31 @@ def main():
 
     # plotting model performance on training data
     plots.plot_model_evaluation(
-        fig_path=RESULTS_DIR / f'model_evaluation_t',
+        fig_path=RESULTS_DIR / f'model_evaluation_v.png',
         model_predictions=np_model_predictions,
-        actual_error=np_labels
+        actual_error=np_labels,
+        title='Model Evalation - training flows'
     )
-    # print(model)
+
+    if EVALUATE:
+        # Evaluation on evaluative flows
+        dc_raw, df_raw = load_data(EVAL_DIR, 'e')
+        fl = generate_features_labels(dc_raw, df_raw, 'e.png')
+        train_loader, val_loader = generate_dataloaders(fl)
+
+        model_predictions = model.forward(train_loader.dataset.dataset.tensors[0].float())
+        labels = train_loader.dataset.dataset.tensors[1]
+
+        np_model_predictions = model_predictions.detach().numpy()
+        np_labels = labels.detach().numpy()
+
+        # plotting model performance on training data
+        plots.plot_model_evaluation(
+            fig_path=RESULTS_DIR / f'model_evaluation_e.png',
+            model_predictions=np_model_predictions,
+            actual_error=np_labels,
+            title='Model Evaluation - Interpolative Evaluation'
+        )
 
 
 if __name__ == '__main__':

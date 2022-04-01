@@ -5,6 +5,8 @@ import torch
 import numpy as np
 from matplotlib import pyplot as plt  # type: ignore
 
+plt.rcParams.update({'font.size': 20})
+
 
 def plot_loss_history(fig_path: Path,
                       n_epochs: int,
@@ -12,7 +14,6 @@ def plot_loss_history(fig_path: Path,
                       val_losses: List[float],
                       loss_fn: str,
                       experiment: str) -> None:
-
     """ Plots training_validation loss against epochs.
 
     Parameters
@@ -49,8 +50,8 @@ def plot_loss_history(fig_path: Path,
 
 def plot_model_evaluation(fig_path: Path,
                           model_predictions: np.ndarray,
-                          actual_error: np.ndarray) -> None:
-
+                          actual_error: np.ndarray,
+                          title: str) -> None:
     """ Plots model predictions against ground truth.
 
     Parameters
@@ -61,16 +62,18 @@ def plot_model_evaluation(fig_path: Path,
         Model outputs as a numpy array.
     actual_error: np.ndarray
         Ground truth as a numpy array.
+    title: str
+        Figure title.
     """
 
-    fig = plt.figure(figsize=(20, 20))
+    fig = plt.figure(figsize=(16, 16))
     ax = fig.gca()
 
-    ax.plot(model_predictions, actual_error, '+')
+    ax.scatter(model_predictions, actual_error, s=100)
     ax.plot(actual_error, actual_error, 'black', label='actual_error = predicted_error')
 
     plt.suptitle('Grid error in cell-centred T', axes=ax)
-    plt.title('Evaluation of Model - Training Flows', axes=ax)
+    plt.title(title, axes=ax)
     # plt.rcParams['font.size'] = '8'
     plt.xlabel('Model-predicted error', axes=ax)
     plt.ylabel('Actual error', axes=ax)
