@@ -10,4 +10,5 @@
 /src/wandb/
 /pycoarsenet/postprocessing/__pycache__/
 /pycoarsenet/src/wandb/*
+/wandb/
 tmp_*

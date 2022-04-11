@@ -1,7 +1,7 @@
 import enum
 
 
-class eFeatures(enum):
+class eFeatures(enum.Enum):
     X = 0
     Y = 1
     Z = 2

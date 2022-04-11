@@ -2,14 +2,16 @@ import csv
 import sys
 from collections import OrderedDict
 from pathlib import Path
-from typing import List, Tuple
+from typing import List, Tuple, Union
 
 import torch
 import torch.nn as nn
 import numpy as np
-import wandb
 from torch import Tensor
 from torch.utils.data import DataLoader, TensorDataset
+import wandb
+from wandb.sdk.lib import RunDisabled
+from wandb.wandb_run import Run
 
 import galilean_invariance
 
@@ -20,14 +22,14 @@ from pycoarsenet.data.enums import eFeatures
 from pycoarsenet.postprocessing import plots
 
 DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-INVARIANCE: bool = False
-TENSOR_INVARIANTS: bool = False
+INVARIANCE: bool = True
+TENSOR_INVARIANTS: bool = True
 N_EPOCHS: int = 200
 LEARNING_RATE: float = 0.001
 EVALUATE: bool = True
 DATA_DIR: Path = Path('/home/hamza/Projects/TorchFoam/Data/changing_alpha/')
 EVAL_DIR: Path = Path('/home/hamza/Projects/TorchFoam/Data/changing_alpha/evaluation_flows/')
-RESULTS_DIR: Path = Path('/home/hamza/Projects/PyCoarseNet/results/') / '7_10x1_1'
+
 # / 'non-invariant features'
 COARSE_SPACING: float = 0.05
 FINE_SIZE: int = 100
@@ -37,8 +39,8 @@ COARSE_SIZE: int = 20
 INDICES: List[int] = [3, 4, 5, 7, 8, 10, 11]
 
 TRAINING_VALS: List[float] = [0.001, 0.005, 0.01, 0.05]
-#EVAL_VALS: List[float] = [0.001, 0.005, 0.01, 0.05]
-EVAL_VALS: List[float] = [0.0025, 0.0075, 0.025]
+# EVAL_VALS: List[float] = [0.001, 0.005, 0.01, 0.05]
+EVAL_VALS: List[float] = [0.001, 0.005, 0.01, 0.05]
 
 TRAINING_FRACTION: float = 0.8
 BATCH_SIZE: int = 1
@@ -123,23 +125,23 @@ def generate_features_labels(data_coarse: Tensor, data_fine: Tensor, mode: str) 
     data_fine_ds = initialise.downsampling(COARSE_SIZE, FINE_SIZE, data_fine)
 
     targets = data_fine_ds[:, [
-                                eFeatures.T.value,
-                                eFeatures.dT_dX.value,
-                                eFeatures.dT_dY.value,
-                                eFeatures.d2T_dXX.value,
-                                eFeatures.d2T_dXY.value,
-                                eFeatures.d2T_dYX.value,
-                                eFeatures.d2T_dYY.value
+                                  eFeatures.T.value,
+                                  eFeatures.dT_dX.value,
+                                  eFeatures.dT_dY.value,
+                                  eFeatures.d2T_dXX.value,
+                                  eFeatures.d2T_dXY.value,
+                                  eFeatures.d2T_dYX.value,
+                                  eFeatures.d2T_dYY.value
                               ], ...]
     features_partial = data_coarse[:, [
-                                eFeatures.T.value,
-                                eFeatures.dT_dX.value,
-                                eFeatures.dT_dY.value,
-                                eFeatures.d2T_dXX.value,
-                                eFeatures.d2T_dXY.value,
-                                eFeatures.d2T_dYX.value,
-                                eFeatures.d2T_dYY.value
-                              ], ...]
+                                          eFeatures.T.value,
+                                          eFeatures.dT_dX.value,
+                                          eFeatures.dT_dY.value,
+                                          eFeatures.d2T_dXX.value,
+                                          eFeatures.d2T_dXY.value,
+                                          eFeatures.d2T_dYX.value,
+                                          eFeatures.d2T_dYY.value
+                                      ], ...]
 
     # T is first column in targets and features_partial
     delta_var = targets[:, 0] - features_partial[:, 0]
@@ -163,15 +165,15 @@ def generate_features_labels(data_coarse: Tensor, data_fine: Tensor, mode: str) 
             features = torch.cat((d_mag,
                                   invar_1.unsqueeze(-1),
                                   invar_2.unsqueeze(-1)),
-                                  dim=-1
+                                 dim=-1
                                  )
 
             """Experiment 2 features"""
-            #features = torch.cat((d_mag, h_eigs), dim=-1)
+            # features = torch.cat((d_mag, h_eigs), dim=-1)
 
         else:
             # join d_mag and h_eigs to make features
-            #features = torch.cat((features_partial[:, :2], h_eigs), dim=-1)
+            # features = torch.cat((features_partial[:, :2], h_eigs), dim=-1)
             """Uncomment below for both derivatives to be invariant"""
             # features = torch.cat((d_mag, h_eigs), dim=-1)
     else:
@@ -208,7 +210,10 @@ def generate_dataloaders(features_labels: Tensor) -> Tuple[DataLoader, DataLoade
     return train_loader, val_loader
 
 
-def train(model: Network, train_loader: DataLoader, val_loader: DataLoader) -> None:
+def train(model: Network,
+          train_loader: DataLoader,
+          val_loader: DataLoader,
+          wandb_run: Union[Run, RunDisabled]) -> None:
     """ Training loop. Writes output to CSV file.
 
     Parameters
@@ -304,60 +309,51 @@ def train(model: Network, train_loader: DataLoader, val_loader: DataLoader) -> N
             writer.writerow(epoch_results)
 
         # log results to wandb
-        results_dict = {'epoch': epoch, 'train_mse_loss': train_mse_loss, 'val_mse_loss': val_mse_loss}
-        wandb.log(results_dict)
+        if isinstance(wandb_run, Run):
+            results_dict = {'epoch': epoch, 'train_mse_loss': train_mse_loss, 'val_mse_loss': val_mse_loss}
+            wandb_run.log(results_dict)
 
     print('Training complete.')
 
 
 def main():
-    wandb.init(project="cg-cfd", entity="hamzasardar", )
 
-    # initialise network, load training data, and run training
-    model: Network = Network([7, 10, 10, 1], activation_fn=nn.Tanh())
-    dc_raw, df_raw = load_data(DATA_DIR, 't')
-    fl = generate_features_labels(dc_raw, df_raw, 't')
-    train_loader, val_loader = generate_dataloaders(fl)
-    train(model, train_loader, val_loader)
+    # toggle training
+    # switch to false to load a saved model
+    model_train = True
 
-    # plotting loss history
-    plots.plot_loss_history(
-        fig_path=RESULTS_DIR / 'loss_history.png',
-        n_epochs=N_EPOCHS,
-        train_losses=TRAIN_LOSSES,
-        val_losses=VAL_LOSSES,
-        loss_fn='MSE Loss',
-        experiment='Galilean Invariance - varying alpha'
-    )
+    if model_train:
+        # initialise weights and biases - will create a random name for the run
+        run = wandb.init(project="cg-cfd", entity="hamzasardar")
 
-    wandb.save('model.h5')
-    wandb.finish()
+        # give local results the same name as the wandb run
+        global RESULTS_DIR
+        RESULTS_DIR = Path(
+            '/home/hamza/Projects/PyCoarseNet/results/'
+        ) / '90_degrees_rotated' / 'invariants_only' / run.name
 
-    # Evaluation on training data
-
-    model.eval()
-
-    model_predictions = model.forward(val_loader.dataset.dataset.tensors[0].float())
-    labels = train_loader.dataset.dataset.tensors[1]
-
-    np_model_predictions = model_predictions.detach().numpy()
-    np_labels = labels.detach().numpy()
-
-    # plotting model performance on training data
-    plots.plot_model_evaluation(
-        fig_path=RESULTS_DIR / f'model_evaluation_v.png',
-        model_predictions=np_model_predictions,
-        actual_error=np_labels,
-        title='Model Evalation - training flows'
-    )
-
-    if EVALUATE:
-        # Evaluation on evaluative flows
-        dc_raw, df_raw = load_data(EVAL_DIR, 'e')
-        fl = generate_features_labels(dc_raw, df_raw, 'e.png')
+        # initialise network, load training data, and run training
+        model: Network = Network([4, 10, 10, 1], activation_fn=nn.Tanh())
+        dc_raw, df_raw = load_data(DATA_DIR, 't')
+        fl = generate_features_labels(dc_raw, df_raw, 't')
         train_loader, val_loader = generate_dataloaders(fl)
+        train(model, train_loader, val_loader, wandb_run=run)
 
-        model_predictions = model.forward(train_loader.dataset.dataset.tensors[0].float())
+        # plotting loss history
+        plots.plot_loss_history(
+            fig_path=RESULTS_DIR / 'loss_history.png',
+            n_epochs=N_EPOCHS,
+            train_losses=TRAIN_LOSSES,
+            val_losses=VAL_LOSSES,
+            loss_fn='MSE Loss',
+            experiment='Galilean Invariance - varying alpha'
+        )
+
+        # Evaluation on training data
+
+        model.eval()
+
+        model_predictions = model.forward(val_loader.dataset.dataset.tensors[0].float())
         labels = train_loader.dataset.dataset.tensors[1]
 
         np_model_predictions = model_predictions.detach().numpy()
@@ -365,11 +361,48 @@ def main():
 
         # plotting model performance on training data
         plots.plot_model_evaluation(
-            fig_path=RESULTS_DIR / f'model_evaluation_e.png',
+            fig_path=RESULTS_DIR / f'model_evaluation_v.png',
             model_predictions=np_model_predictions,
             actual_error=np_labels,
-            title='Model Evaluation - Interpolative Evaluation'
+            title='Model Evalation - training flows'
         )
+
+        if EVALUATE:
+            # Evaluation on evaluative flows
+            dc_raw, df_raw = load_data(EVAL_DIR, 'e')
+            fl = generate_features_labels(dc_raw, df_raw, 'e.png')
+            train_loader, val_loader = generate_dataloaders(fl)
+
+            model_predictions = model.forward(train_loader.dataset.dataset.tensors[0].float())
+            labels = train_loader.dataset.dataset.tensors[1]
+
+            np_model_predictions = model_predictions.detach().numpy()
+            np_labels = labels.detach().numpy()
+
+            # plotting model performance on training data
+            plots.plot_model_evaluation(
+                fig_path=RESULTS_DIR / f'model_evaluation_e.png',
+                model_predictions=np_model_predictions,
+                actual_error=np_labels,
+                title='Model Evaluation - Interpolative Evaluation'
+            )
+
+        # save model locally
+        torch.save(model.state_dict(), RESULTS_DIR / f'model_{run.name}.h5')
+
+        # initialise model as wandb artifact
+        artifact = wandb.Artifact('model', type='model')
+        artifact.add_file(RESULTS_DIR / f'model_{run.name}.h5')
+
+        # save model to wandb
+        run.log_artifact(artifact)
+        run.finish()
+
+    else:
+        # specify and load a previously saved model
+        model_path: str = ''
+        model_name: str = ''
+        model = wandb.restore(model_name, model_path)
 
 
 if __name__ == '__main__':
