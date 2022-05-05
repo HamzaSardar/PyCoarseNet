@@ -24,7 +24,7 @@ from pycoarsenet.postprocessing import plots
 DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 INVARIANCE: bool = True
 TENSOR_INVARIANTS: bool = True
-N_EPOCHS: int = 200
+N_EPOCHS: int = 10
 LEARNING_RATE: float = 0.001
 EVALUATE: bool = True
 DATA_DIR: Path = Path('/home/hamza/Projects/TorchFoam/Data/changing_alpha/')
@@ -38,10 +38,9 @@ COARSE_SIZE: int = 20
 # TODO: replace below with an enum
 INDICES: List[int] = [3, 4, 5, 7, 8, 10, 11]
 
-TRAINING_VALS: List[float] = [0.001, 0.005, 0.01, 0.05]
+TRAINING_VALS: List[float] = [0.0001, 0.0005, 0.001, 0.0025, 0.005, 0.0075, 0.01, 0.05]
 # EVAL_VALS: List[float] = [0.001, 0.005, 0.01, 0.05]
-EVAL_VALS: List[float] = [0.001, 0.005, 0.01, 0.05]
-
+EVAL_VALS: List[float] = [0.0001, 0.0005, 0.001, 0.0025, 0.005, 0.0075, 0.01, 0.05]
 TRAINING_FRACTION: float = 0.8
 BATCH_SIZE: int = 1
 
@@ -181,9 +180,33 @@ def generate_features_labels(data_coarse: Tensor, data_fine: Tensor, mode: str) 
 
     features_labels = torch.cat((features, Pe, labels), dim=-1)
 
+    """ removing points with error O(10e-6) and below"""
+
+    # zero_indices = []
+    #
+    # for i in range(labels.shape[0]):
+    #     if abs(labels[i]) <= 10e-6:
+    #         zero_indices.append(i)
+    #
+    # def th_delete(tensor, indices):
+    #     mask = torch.ones(tensor[:, 0].numel(), dtype=torch.bool)
+    #     mask[indices] = False
+    #     return tensor[mask]
+    #
+    # features_labels = th_delete(features_labels, zero_indices)
+    # print(f'Number of data points used: {features_labels.shape[0]}')
+
+    """ statistical or physical normalisation: """
     # normalise all but the labels
     for i in range(features_labels.shape[1] - 1):  # type: ignore
         features_labels = initialise.normalise(features_labels, i)
+
+    # # normalise gradients with grid spacing
+    # features_labels[:, 0] *= COARSE_SPACING
+    # features_labels[:, (1, 2)] *= (COARSE_SPACING ** 2)
+    #
+    # # normalise Pe statistically
+    # features_labels = initialise.normalise(features_labels, -1)
 
     return features_labels
 
@@ -229,6 +252,9 @@ def train(model: Network,
     # set Optimiser
     optimiser = torch.optim.Adam(model.parameters(), lr=LEARNING_RATE)
 
+    # # alternative Optimiser
+    # optimiser = torch.optim.LBFGS(model.parameters(), lr=1)
+
     # set loss function
     loss_fn: nn.Module = nn.MSELoss()
 
@@ -258,6 +284,18 @@ def train(model: Network,
         # training step
         model.train()
         for feature_vector, label in train_loader:
+
+            # def closure():
+            #     if torch.is_grad_enabled():
+            #         optimiser.zero_grad()
+            #     output = model.forward(feature_vector.float())
+            #     loss = loss_fn(output, label.unsqueeze(-1).float())
+            #     if loss.requires_grad:
+            #         loss.backward()
+            #     return loss
+            #
+            # optimiser.step(closure)
+
             # move data to GPU if available
             feature_vector = feature_vector.to(DEVICE)
             label = label.to(DEVICE)
@@ -400,9 +438,15 @@ def main():
 
     else:
         # specify and load a previously saved model
-        model_path: str = ''
-        model_name: str = ''
-        model = wandb.restore(model_name, model_path)
+        # model_path: str = ''
+        # model_name: str = ''
+        # model = wandb.restore(model_name, model_path)
+
+        # initialise network, load training data, and run training
+        model: Network = Network([4, 10, 1], activation_fn=nn.Tanh())
+        dc_raw, df_raw = load_data(DATA_DIR, 't')
+        fl = generate_features_labels(dc_raw, df_raw, 't')
+        train_loader, val_loader = generate_dataloaders(fl)
 
 
 if __name__ == '__main__':

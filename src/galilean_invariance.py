@@ -95,6 +95,6 @@ def hessian_invariants(eigs: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
     lambda_2 = eigs[:, 1]
 
     invar_1 = lambda_1 + lambda_2
-    invar_2 = (lambda_1 ** 2) + (lambda_2 ** 2) - (2 * lambda_1 * lambda_2)
+    invar_2 = lambda_1 * lambda_2
 
     return invar_1, invar_2
