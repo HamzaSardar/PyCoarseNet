@@ -4,6 +4,8 @@ from collections import OrderedDict
 from pathlib import Path
 from typing import List, Tuple, Union
 
+import yaml
+
 import torch
 import torch.nn as nn
 import numpy as np
