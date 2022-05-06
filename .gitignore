@@ -12,3 +12,4 @@
 /pycoarsenet/src/wandb/*
 /wandb/
 tmp_*
+.tmp_*
