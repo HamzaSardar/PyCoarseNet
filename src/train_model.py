@@ -286,7 +286,6 @@ def train(model: Network,
         # training step
         model.train()
         for feature_vector, label in train_loader:
-
             # def closure():
             #     if torch.is_grad_enabled():
             #         optimiser.zero_grad()
@@ -357,7 +356,6 @@ def train(model: Network,
 
 
 def main():
-
     # toggle training
     # switch to false to load a saved model
     model_train = True
