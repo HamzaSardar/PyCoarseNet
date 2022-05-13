@@ -245,6 +245,15 @@ def train(model: Network,
     # set Optimiser
     optimiser = torch.optim.Adam(model.parameters(), lr=config.LEARNING_RATE)
 
+    # set Cyclical Learning Rate scheduler
+    scheduler = torch.optim.lr_scheduler.CyclicLR(
+        optimizer=optimiser,
+        base_lr=0.0001,
+        max_lr=0.001,
+        step_size_up=10000,
+        cycle_momentum=False
+    )
+
     # set loss function
     loss_fn: nn.Module = nn.MSELoss()
 
@@ -301,6 +310,7 @@ def train(model: Network,
             optimiser.zero_grad()
             batch_t_loss.backward()
             optimiser.step()
+            scheduler.step()
 
         # validation step
         model.eval()
@@ -344,6 +354,7 @@ def train(model: Network,
 
 
 def main(args: argparse.Namespace) -> None:
+
     # toggle training
     # switch to false to load a saved model
     model_train = True
@@ -356,7 +367,7 @@ def main(args: argparse.Namespace) -> None:
         # initialise weights and biases - will create a random name for the run
         run = wandb.init(
             config=train_config.config,
-            project="cg-cfd",
+            project="cg-cfd with CLR",
             entity="hamzasardar"
         )
 
@@ -365,7 +376,7 @@ def main(args: argparse.Namespace) -> None:
         RESULTS_DIR = args.results_path / run.name
 
         # initialise network, load training data, and run training
-        model: Network = Network([4, 10, 10, 1], activation_fn=nn.Tanh())
+        model: Network = Network([4, 10, 10, 10, 10, 1], activation_fn=nn.Tanh())
         dc_raw, df_raw = load_data(args.data_path, 't')
         fl = generate_features_labels(dc_raw, df_raw, 't', train_config)
         train_loader, val_loader = generate_dataloaders(fl, train_config)
