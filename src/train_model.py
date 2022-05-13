@@ -344,7 +344,6 @@ def train(model: Network,
 
 
 def main(args: argparse.Namespace) -> None:
-
     # toggle training
     # switch to false to load a saved model
     model_train = True
