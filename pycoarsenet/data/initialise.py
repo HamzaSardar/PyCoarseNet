@@ -25,7 +25,11 @@ def generate_cell_Pe(data: torch.Tensor, values: List[float], cg_spacing: float)
     # Cell peclet number is delta_x / diffusivity
     num_var = data.shape[-1]
     data = einops.rearrange(data, '(sim i j) var -> (i j) sim var', sim=len(values), var=num_var, i=int(1 / cg_spacing))
-    Pe_tensor = torch.cat(([(cg_spacing * torch.ones(data.shape[0]) / i) for i in values]), dim=0).unsqueeze(-1)
+
+    """Note that below is a wrong calculation of Pe_cell - see file 'McConkey Notes' in ipad'"""
+    # Pe_tensor = torch.cat(([(cg_spacing * torch.ones(data.shape[0]) / i) for i in values]), dim=0).unsqueeze(-1)
+
+    Pe_tensor = torch.cat(([(0.07107 * torch.ones(data.shape[0]) / i) for i in values]), dim=0).unsqueeze(-1)
 
     return Pe_tensor
 
