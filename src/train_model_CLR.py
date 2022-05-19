@@ -136,7 +136,7 @@ def generate_features_labels(data_coarse: Tensor, data_fine: Tensor, mode: str, 
         features_partial = features_partial[:, 1:]
 
         # convert first derivatives to magnitude
-        d_mag = galilean_invariance.derivative_magnitude(features_partial[:, 2])
+        d_mag = galilean_invariance.derivative_magnitude(features_partial[:, :2])
 
         # convert second derivatives to eigenvalues
         h_eigs = galilean_invariance.hessian_eigenvalues(features_partial[:, 2:])
@@ -220,6 +220,14 @@ def generate_dataloaders(features_labels: Tensor, config: Config) -> Tuple[DataL
 
     return train_loader, val_loader
 
+
+# def _return_plotting_sets(features_labels: Tensor, config: Config) -> Tuple[DataLoader, DataLoader]:
+#
+#     full_ds = TensorDataset(features_labels[:, :-1], features_labels[:, -1])
+#     train_ds, val_ds = initialise.training_val_split(full_ds, config.TRAINING_FRACTION)
+#
+#
+#
 
 def train(model: Network,
           train_loader: DataLoader,
@@ -376,11 +384,11 @@ def main(args: argparse.Namespace) -> None:
         RESULTS_DIR = args.results_path / run.name
 
         # initialise network, load training data, and run training
-        model: Network = Network([4, 10, 10, 10, 10, 1], activation_fn=nn.Tanh())
+        network: Network = Network([4, 10, 10, 10, 10, 1], activation_fn=nn.Tanh())
         dc_raw, df_raw = load_data(args.data_path, 't')
         fl = generate_features_labels(dc_raw, df_raw, 't', train_config)
         train_loader, val_loader = generate_dataloaders(fl, train_config)
-        train(model,  train_loader, val_loader, config=train_config, wandb_run=run)
+        train(network,  train_loader, val_loader, config=train_config, wandb_run=run)
 
         # plotting loss history
         plots.plot_loss_history(
@@ -394,10 +402,10 @@ def main(args: argparse.Namespace) -> None:
 
         # Evaluation on training data
 
-        model.eval()
+        network.eval()
 
-        model_predictions = model.forward(val_loader.dataset.dataset.tensors[0].float())
-        labels = train_loader.dataset.dataset.tensors[1]
+        model_predictions = network.forward(fl[val_loader.dataset.indices, :-1].float())
+        labels = fl[val_loader.dataset.indices, -1]
 
         np_model_predictions = model_predictions.detach().numpy()
         np_labels = labels.detach().numpy()
@@ -407,7 +415,7 @@ def main(args: argparse.Namespace) -> None:
             fig_path=RESULTS_DIR / f'model_evaluation_v.png',
             model_predictions=np_model_predictions,
             actual_error=np_labels,
-            title='Model Evalation - training flows'
+            title='Model Evalation - Validation Data'
         )
 
         if train_config.EVALUATE:
@@ -416,8 +424,8 @@ def main(args: argparse.Namespace) -> None:
             fl = generate_features_labels(dc_raw, df_raw, 'e.png', train_config)
             train_loader, val_loader = generate_dataloaders(fl, train_config)
 
-            model_predictions = model.forward(train_loader.dataset.dataset.tensors[0].float())
-            labels = train_loader.dataset.dataset.tensors[1]
+            model_predictions = network.forward(fl[train_loader.dataset.indices, :-1].float())
+            labels = fl[train_loader.dataset.indices, -1]
 
             np_model_predictions = model_predictions.detach().numpy()
             np_labels = labels.detach().numpy()
@@ -427,14 +435,14 @@ def main(args: argparse.Namespace) -> None:
                 fig_path=RESULTS_DIR / f'model_evaluation_e.png',
                 model_predictions=np_model_predictions,
                 actual_error=np_labels,
-                title='Model Evaluation - Interpolative Evaluation'
+                title='Model Evaluation - Evaluation of Invariance'
             )
 
         # save model locally
-        torch.save(model.state_dict(), RESULTS_DIR / f'model_{run.name}.h5')
+        torch.save(network.model.state_dict(), RESULTS_DIR / f'model_{run.name}.h5')
 
         # initialise model as wandb artifact
-        artifact = wandb.Artifact('model', type='model')
+        artifact = wandb.Artifact('network', type='model')
         artifact.add_file(RESULTS_DIR / f'model_{run.name}.h5')
 
         # save model to wandb

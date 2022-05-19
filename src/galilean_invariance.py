@@ -14,7 +14,7 @@ def derivative_magnitude(d_tensor: torch.Tensor) -> torch.Tensor:
     Returns
     -------
     d_mag: torch.Tensor
-        Single column tensor containing magnitudes of derivative vectors.
+        Single column tensor containing 2-norm of derivative vectors.
 
     """
 
