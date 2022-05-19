@@ -404,6 +404,7 @@ def main(args: argparse.Namespace) -> None:
 
         network.eval()
 
+        # below now accesses the right datasets
         model_predictions = network.forward(fl[val_loader.dataset.indices, :-1].float())
         labels = fl[val_loader.dataset.indices, -1]
 
@@ -460,10 +461,6 @@ def main(args: argparse.Namespace) -> None:
         dc_raw, df_raw = load_data(DATA_DIR, 't')
         fl = generate_features_labels(dc_raw, df_raw, 't')
         train_loader, val_loader = generate_dataloaders(fl)
-
-        # pass data into loaded model
-        # model_outputs = model.forward(feature_vector.float())
-        # model_loss = loss_fn(_model_outputs, label.unsqueeze(-1).float())
 
 
 if __name__ == '__main__':
