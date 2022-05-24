@@ -6,25 +6,37 @@ import torch.nn as nn
 
 class Network(nn.Module):
     def __init__(self,
-                 layers: List[int],
-                 activation_fn: nn.Module = nn.Tanh(),
-                 learning_rate: float = 1e-2):
+                 feature_size: int,
+                 output_size: int,
+                 num_hidden_layers: int,
+                 num_neurons: int,
+                 activation_fn: nn.Module = nn.Tanh()):
 
         """Instantiates Neural Network.
 
         Parameters
         ----------
-        layers: List[int]
-            List containing number of neurons per layer.
+        feature_size: int
+            Size of feature vector.
+        output_size: int
+            Number of elements in the output layer, typically 1.
+        num_hidden_layers: int
+            Number of hidden layers.
+        num_neurons: int
+            Number of neurons per hidden layer.
         activation_fn: nn.Module
             Activation function for the network.
-        learning_rate: float
-            Initial learning rate.
         """
 
         super().__init__()
+
+        # generate layers from input
+        layers = [feature_size]
+        for i in range(num_hidden_layers):
+            layers.append(num_neurons)
+        layers.append(output_size)
+
         self.activation = activation_fn
-        self.learning_rate = learning_rate
         self.model = nn.Sequential(*self._create_linear_layers(layers, self.activation))
 
     @staticmethod

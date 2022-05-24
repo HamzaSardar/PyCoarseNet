@@ -23,8 +23,8 @@ from pycoarsenet.postprocessing import plots
 from pycoarsenet.utils.config import Config
 
 DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
 TRAINING_VALS: List[float] = [0.0001, 0.0005, 0.001, 0.0025, 0.005, 0.0075, 0.01, 0.05]
-# EVAL_VALS: List[float] = [0.001, 0.005, 0.01, 0.05]
 EVAL_VALS: List[float] = [0.0001, 0.0005, 0.001, 0.0025, 0.005, 0.0075, 0.01, 0.05]
 
 TRAIN_LOSSES: List[float] = []
@@ -49,6 +49,7 @@ def load_data(data_dir: Path, mode: str) -> Tuple[Tensor, Tensor]:
         Fine grid data from specified simulations.
     """
 
+    # initialise dictionaries to load data from different simulations into
     data_coarse_dict = OrderedDict()
     data_fine_dict = OrderedDict()
 
@@ -60,6 +61,7 @@ def load_data(data_dir: Path, mode: str) -> Tuple[Tensor, Tensor]:
             data_coarse_dict[alpha] = torch.load(coarse_path)
             data_fine_dict[alpha] = torch.load(fine_path)
 
+        # create raw data tensors
         data_coarse_raw = torch.cat(([*data_coarse_dict.values()]), dim=0)
         data_fine_raw = torch.cat(([*data_fine_dict.values()]), dim=0)
 
@@ -71,6 +73,7 @@ def load_data(data_dir: Path, mode: str) -> Tuple[Tensor, Tensor]:
             data_coarse_dict[alpha] = torch.load(coarse_path)
             data_fine_dict[alpha] = torch.load(fine_path)
 
+        # create raw data tensors
         data_coarse_raw = torch.cat(([*data_coarse_dict.values()]), dim=0)
         data_fine_raw = torch.cat(([*data_fine_dict.values()]), dim=0)
 
@@ -99,6 +102,8 @@ def generate_features_labels(data_coarse: Tensor, data_fine: Tensor, mode: str, 
     features_labels: Tensor
         Preprocessed tensor containing features and labels, to be converted into torch Dataset.
     """
+
+    # generate tensor column of Peclet number
     if mode.lower()[0] == 't':
         Pe = initialise.generate_cell_Pe(data_coarse, values=TRAINING_VALS, cg_spacing=config.COARSE_SPACING)
     elif mode.lower()[0] == 'e':
@@ -106,8 +111,10 @@ def generate_features_labels(data_coarse: Tensor, data_fine: Tensor, mode: str, 
     else:
         raise ValueError('Mode must be "t" or "e".')
 
+    # downsample the fine grid data to have tensors of matching size for the coarse and fine grid data
     data_fine_ds = initialise.downsampling(config.COARSE_SIZE, config.FINE_SIZE, data_fine)
 
+    # take the relevant values from the raw dataset
     targets = data_fine_ds[:, [
                                   eFeatures.T.value,
                                   eFeatures.dT_dX.value,
@@ -145,53 +152,25 @@ def generate_features_labels(data_coarse: Tensor, data_fine: Tensor, mode: str, 
             # return tensor invariants
             invar_1, invar_2 = galilean_invariance.hessian_invariants(h_eigs)
 
-            """Experiment 1 features"""
+            # create feature vector with galilean invariance
             features = torch.cat((d_mag,
                                   invar_1.unsqueeze(-1),
                                   invar_2.unsqueeze(-1)),
                                  dim=-1
                                  )
 
-            """Experiment 2 features"""
-            # features = torch.cat((d_mag, h_eigs), dim=-1)
-
         else:
-            # join d_mag and h_eigs to make features
-            # features = torch.cat((features_partial[:, :2], h_eigs), dim=-1)
-            """Uncomment below for both derivatives to be invariant"""
-            # features = torch.cat((d_mag, h_eigs), dim=-1)
+            # create feature vector with rotatational invariance
+            features = torch.cat((d_mag, h_eigs), dim=-1)
     else:
+        # create feature vector with no invariance
         features = features_partial[:, 1:]
 
     features_labels = torch.cat((features, Pe, labels), dim=-1)
 
-    """ removing points with error O(10e-6) and below"""
-
-    # zero_indices = []
-    #
-    # for i in range(labels.shape[0]):
-    #     if abs(labels[i]) <= 10e-6:
-    #         zero_indices.append(i)
-    #
-    # def th_delete(tensor, indices):
-    #     mask = torch.ones(tensor[:, 0].numel(), dtype=torch.bool)
-    #     mask[indices] = False
-    #     return tensor[mask]
-    #
-    # features_labels = th_delete(features_labels, zero_indices)
-    # print(f'Number of data points used: {features_labels.shape[0]}')
-
-    """ statistical or physical normalisation: """
     # normalise all but the labels
     for i in range(features_labels.shape[1] - 1):  # type: ignore
         features_labels = initialise.normalise(features_labels, i)
-
-    # # normalise gradients with grid spacing
-    # features_labels[:, 0] *= COARSE_SPACING
-    # features_labels[:, (1, 2)] *= (COARSE_SPACING ** 2)
-    #
-    # # normalise Pe statistically
-    # features_labels = initialise.normalise(features_labels, -1)
 
     return features_labels
 
@@ -212,22 +191,16 @@ def generate_dataloaders(features_labels: Tensor, config: Config) -> Tuple[DataL
         training and validation DataLoaders.
     """
 
+    # convert the data tensor to a TensorDataset and split it into training and validation
     full_ds = TensorDataset(features_labels[:, :-1], features_labels[:, -1])
     train_ds, val_ds = initialise.training_val_split(full_ds, config.TRAINING_FRACTION)
 
+    # use the TensorDataset to create DataLoaders
     train_loader = DataLoader(train_ds, batch_size=config.BATCH_SIZE, shuffle=True)
     val_loader = DataLoader(val_ds, batch_size=config.BATCH_SIZE, shuffle=True)
 
     return train_loader, val_loader
 
-
-# def _return_plotting_sets(features_labels: Tensor, config: Config) -> Tuple[DataLoader, DataLoader]:
-#
-#     full_ds = TensorDataset(features_labels[:, :-1], features_labels[:, -1])
-#     train_ds, val_ds = initialise.training_val_split(full_ds, config.TRAINING_FRACTION)
-#
-#
-#
 
 def train(model: Network,
           train_loader: DataLoader,
@@ -256,8 +229,8 @@ def train(model: Network,
     # set Cyclical Learning Rate scheduler
     scheduler = torch.optim.lr_scheduler.CyclicLR(
         optimizer=optimiser,
-        base_lr=0.0001,
-        max_lr=0.001,
+        base_lr=config.MIN_LEARNING_RATE,
+        max_lr=config.LEARNING_RATE,
         step_size_up=10000,
         cycle_momentum=False
     )
@@ -291,16 +264,6 @@ def train(model: Network,
         # training step
         model.train()
         for feature_vector, label in train_loader:
-            # def closure():
-            #     if torch.is_grad_enabled():
-            #         optimiser.zero_grad()
-            #     output = model.forward(feature_vector.float())
-            #     loss = loss_fn(output, label.unsqueeze(-1).float())
-            #     if loss.requires_grad:
-            #         loss.backward()
-            #     return loss
-            #
-            # optimiser.step(closure)
 
             # move data to GPU if available
             feature_vector = feature_vector.to(DEVICE)
@@ -323,6 +286,7 @@ def train(model: Network,
         # validation step
         model.eval()
         for feature_vector, label in val_loader:
+
             # move data to GPU if available
             feature_vector = feature_vector.to(DEVICE)
             label = label.to(DEVICE)
@@ -384,11 +348,17 @@ def main(args: argparse.Namespace) -> None:
         RESULTS_DIR = args.results_path / run.name
 
         # initialise network, load training data, and run training
-        network: Network = Network([4, 10, 10, 10, 10, 1], activation_fn=nn.Tanh())
+        network: Network = Network(
+            feature_size=4,
+            output_size=1,
+            num_hidden_layers=train_config.NUM_HIDDEN_LAYERS,
+            num_neurons=train_config.NUM_NEURONS,
+            activation_fn=nn.Tanh()
+        )
         dc_raw, df_raw = load_data(args.data_path, 't')
         fl = generate_features_labels(dc_raw, df_raw, 't', train_config)
         train_loader, val_loader = generate_dataloaders(fl, train_config)
-        train(network,  train_loader, val_loader, config=train_config, wandb_run=run)
+        train(network, train_loader, val_loader, config=train_config, wandb_run=run)
 
         # plotting loss history
         plots.plot_loss_history(
@@ -464,7 +434,6 @@ def main(args: argparse.Namespace) -> None:
 
 
 if __name__ == '__main__':
-
     # pass cl arguments
     parser = argparse.ArgumentParser(description='PyCoarseNet: CG-CFD Error Prediction')
 
