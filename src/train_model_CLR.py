@@ -339,7 +339,7 @@ def main(args: argparse.Namespace) -> None:
         # initialise weights and biases - will create a random name for the run
         run = wandb.init(
             config=train_config.config,
-            project="cg-cfd with CLR",
+            project="cg-cfd with CLR - random search",
             entity="hamzasardar"
         )
 
