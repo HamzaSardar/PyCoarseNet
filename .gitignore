@@ -9,6 +9,7 @@
 /pycoarsenet/training/__pycache__/
 /pycoarsenet/utils/__pycache__/
 /src/wandb/
+/src/config/
 /pycoarsenet/postprocessing/__pycache__/
 /pycoarsenet/src/wandb/*
 /wandb/
