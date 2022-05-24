@@ -14,9 +14,14 @@ class Config:
     FINE_SIZE: int = field(init=False)
     COARSE_SIZE: int = field(init=False)
 
+    # network parameters
+    NUM_HIDDEN_LAYERS: int = field(init=False)
+    NUM_NEURONS: int = field(init=False)
+
     # training parameters
     N_EPOCHS: int = field(init=False)
     LEARNING_RATE: float = field(init=False)
+    MIN_LEARNING_RATE: float = field(init=False)
     EVALUATE: bool = field(init=False)
     INVARIANCE: bool = field(init=False)
     TENSOR_INVARIANTS: bool = field(init=False)
