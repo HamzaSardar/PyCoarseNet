@@ -25,7 +25,10 @@ from pycoarsenet.utils.config import Config
 DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 TRAINING_VALS: List[float] = [0.0001, 0.0005, 0.001, 0.0025, 0.005, 0.0075, 0.01, 0.05]
-EVAL_VALS: List[float] = [0.0001, 0.0005, 0.001, 0.0025, 0.005, 0.0075, 0.01, 0.05]
+# Used below values to establish that invariance was working
+# we can now instead do interpolative evaluation on the rotated case
+# EVAL_VALS: List[float] = [0.0001, 0.0005, 0.001, 0.0025, 0.005, 0.0075, 0.01, 0.05]
+EVAL_VALS: List[float] = [0.00025, 0.00075, 0.002, 0.004, 0.006, 0.008, 0.025]
 
 TRAIN_LOSSES: List[float] = []
 VAL_LOSSES: List[float] = []
@@ -329,11 +332,15 @@ def main(args: argparse.Namespace) -> None:
 
     # toggle training
     # switch to false to load a saved model
-    model_train = True
+    model_train = False
 
     # load config file
     train_config = Config()
     train_config.load_config(args.config_path)
+
+    dc_raw, df_raw = load_data(args.eval_path, 'e')
+    fl = generate_features_labels(dc_raw, df_raw, 'e.png', train_config)
+    torch.save(fl, '/Users/user/Data/fl_eval_invar')
 
     if model_train:
         # initialise weights and biases - will create a random name for the run
