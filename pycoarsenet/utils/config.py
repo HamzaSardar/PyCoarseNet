@@ -10,6 +10,8 @@ class Config:
     _config: Dict[str, Any] = field(default_factory=dict, repr=False)
 
     # simulation parameters
+    TRAINING_SIMS: list = field(default_factory=list, init=False)
+    TEST_SIMS: list = field(init=False)
     COARSE_SPACING: float = field(init=False)
     FINE_SIZE: int = field(init=False)
     COARSE_SIZE: int = field(init=False)
