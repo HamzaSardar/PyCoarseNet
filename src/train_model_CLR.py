@@ -1,208 +1,25 @@
 import argparse
 import csv
 import sys
-from collections import OrderedDict
 from pathlib import Path
-from typing import List, Tuple, Union
+from typing import List, Union
 
 import torch
 import torch.nn as nn
 import wandb
-from torch import Tensor
 from torch.utils.data import DataLoader, TensorDataset
 from wandb.sdk.lib import RunDisabled
 from wandb.wandb_run import Run
 
-import galilean_invariance
-
 sys.path.append('..')
-import pycoarsenet.data.initialise as initialise
 from pycoarsenet.model import Network
-from pycoarsenet.data.enums import eFeatures
+import pycoarsenet.data.preprocessing as preprocessing
 from pycoarsenet.postprocessing import plots
 from pycoarsenet.utils.config import Config
 
 DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-
-TRAINING_VALS: List[float] = [0.0001, 0.0005, 0.001, 0.0025, 0.005, 0.0075, 0.01, 0.05]
-# Used below values to establish that invariance was working
-# we can now instead do interpolative evaluation on the rotated case
-# EVAL_VALS: List[float] = [0.0001, 0.0005, 0.001, 0.0025, 0.005, 0.0075, 0.01, 0.05]
-EVAL_VALS: List[float] = [0.00025, 0.00075, 0.002, 0.004, 0.006, 0.008, 0.025]
-
 TRAIN_LOSSES: List[float] = []
 VAL_LOSSES: List[float] = []
-
-
-def load_data(data_dir: Path, mode: str) -> Tuple[Tensor, Tensor]:
-    """Loads data from data_dir.
-
-    Parameters
-    ----------
-    data_dir: Path
-        Absolute path to CFD results in torch.Tensor file format. Use DATA_DIR for training, EVAL_DIR for eval.
-    mode: str
-        Training or Evaluation.
-
-    Returns
-    -------
-    data_coarse_raw: Tensor
-        Coarse grid data from specified simulations.
-    data_fine_raw: Tensor
-        Fine grid data from specified simulations.
-    """
-
-    # initialise dictionaries to load data from different simulations into
-    data_coarse_dict = OrderedDict()
-    data_fine_dict = OrderedDict()
-
-    if mode.lower()[0] == 't':
-        for alpha in TRAINING_VALS:
-            coarse_path = data_dir / f'{alpha}_data_coarse.t'
-            fine_path = data_dir / f'{alpha}_data_fine.t'
-
-            data_coarse_dict[alpha] = torch.load(coarse_path)
-            data_fine_dict[alpha] = torch.load(fine_path)
-
-        # create raw data tensors
-        data_coarse_raw = torch.cat(([*data_coarse_dict.values()]), dim=0)
-        data_fine_raw = torch.cat(([*data_fine_dict.values()]), dim=0)
-
-    elif mode.lower()[0] == 'e':
-        for alpha in EVAL_VALS:
-            coarse_path = data_dir / f'{alpha}_data_coarse.t'
-            fine_path = data_dir / f'{alpha}_data_fine.t'
-
-            data_coarse_dict[alpha] = torch.load(coarse_path)
-            data_fine_dict[alpha] = torch.load(fine_path)
-
-        # create raw data tensors
-        data_coarse_raw = torch.cat(([*data_coarse_dict.values()]), dim=0)
-        data_fine_raw = torch.cat(([*data_fine_dict.values()]), dim=0)
-
-    else:
-        raise ValueError('Mode must be Training or Evaluation.')
-
-    return data_coarse_raw, data_fine_raw
-
-
-def generate_features_labels(data_coarse: Tensor, data_fine: Tensor, mode: str, config: Config) -> Tensor:
-    """ Preprocess data and compile into one torch.Tensor.
-
-    Parameters
-    ----------
-    data_coarse: Tensor
-        Simulation data from coarse grid CFD.
-    data_fine: Tensor
-        Simulation data from fine grid CFD.
-    mode: str
-        Training or Evaluation.
-    config: Config
-        YAML config file.
-
-    Returns
-    -------
-    features_labels: Tensor
-        Preprocessed tensor containing features and labels, to be converted into torch Dataset.
-    """
-
-    # generate tensor column of Peclet number
-    if mode.lower()[0] == 't':
-        Pe = initialise.generate_cell_Pe(data_coarse, values=TRAINING_VALS, cg_spacing=config.COARSE_SPACING)
-    elif mode.lower()[0] == 'e':
-        Pe = initialise.generate_cell_Pe(data_coarse, values=EVAL_VALS, cg_spacing=config.COARSE_SPACING)
-    else:
-        raise ValueError('Mode must be "t" or "e".')
-
-    # downsample the fine grid data to have tensors of matching size for the coarse and fine grid data
-    data_fine_ds = initialise.downsampling(config.COARSE_SIZE, config.FINE_SIZE, data_fine)
-
-    # take the relevant values from the raw dataset
-    targets = data_fine_ds[:, [
-                                  eFeatures.T.value,
-                                  eFeatures.dT_dX.value,
-                                  eFeatures.dT_dY.value,
-                                  eFeatures.d2T_dXX.value,
-                                  eFeatures.d2T_dXY.value,
-                                  eFeatures.d2T_dYX.value,
-                                  eFeatures.d2T_dYY.value
-                              ], ...]
-    features_partial = data_coarse[:, [
-                                          eFeatures.T.value,
-                                          eFeatures.dT_dX.value,
-                                          eFeatures.dT_dY.value,
-                                          eFeatures.d2T_dXX.value,
-                                          eFeatures.d2T_dXY.value,
-                                          eFeatures.d2T_dYX.value,
-                                          eFeatures.d2T_dYY.value
-                                      ], ...]
-
-    # T is first column in targets and features_partial
-    delta_var = targets[:, 0] - features_partial[:, 0]
-    labels = delta_var.unsqueeze(-1)
-
-    if config.INVARIANCE:
-        # T at column 0, remove from features
-        features_partial = features_partial[:, 1:]
-
-        # convert first derivatives to magnitude
-        d_mag = galilean_invariance.derivative_magnitude(features_partial[:, :2])
-
-        # convert second derivatives to eigenvalues
-        h_eigs = galilean_invariance.hessian_eigenvalues(features_partial[:, 2:])
-
-        if config.TENSOR_INVARIANTS:
-            # return tensor invariants
-            invar_1, invar_2 = galilean_invariance.hessian_invariants(h_eigs)
-
-            # create feature vector with galilean invariance
-            features = torch.cat((d_mag,
-                                  invar_1.unsqueeze(-1),
-                                  invar_2.unsqueeze(-1)),
-                                 dim=-1
-                                 )
-
-        else:
-            # create feature vector with rotatational invariance
-            features = torch.cat((d_mag, h_eigs), dim=-1)
-    else:
-        # create feature vector with no invariance
-        features = features_partial[:, 1:]
-
-    features_labels = torch.cat((features, Pe, labels), dim=-1)
-
-    # normalise all but the labels
-    for i in range(features_labels.shape[1] - 1):  # type: ignore
-        features_labels = initialise.normalise(features_labels, i)
-
-    return features_labels
-
-
-def generate_dataloaders(features_labels: Tensor, config: Config) -> Tuple[DataLoader, DataLoader]:
-    """ Generate required DataLoaders from preprocessed data.
-
-    Parameters
-    ----------
-    features_labels: Tensor
-        PyTorch Tensor containing features and labels joined at dim=-1.
-    config: Config
-        YAML config file.
-
-    Returns
-    -------
-    train_loader: DataLoader, val_loader: DataLoader
-        training and validation DataLoaders.
-    """
-
-    # convert the data tensor to a TensorDataset and split it into training and validation
-    full_ds = TensorDataset(features_labels[:, :-1], features_labels[:, -1])
-    train_ds, val_ds = initialise.training_val_split(full_ds, config.TRAINING_FRACTION)
-
-    # use the TensorDataset to create DataLoaders
-    train_loader = DataLoader(train_ds, batch_size=config.BATCH_SIZE, shuffle=True)
-    val_loader = DataLoader(val_ds, batch_size=config.BATCH_SIZE, shuffle=True)
-
-    return train_loader, val_loader
 
 
 def train(model: Network,
@@ -329,18 +146,15 @@ def train(model: Network,
 
 
 def main(args: argparse.Namespace) -> None:
+    # toggle profile plots
+    compare_profiles = False
 
     # toggle training
-    # switch to false to load a saved model
-    model_train = False
+    model_train = True
 
     # load config file
     train_config = Config()
     train_config.load_config(args.config_path)
-
-    dc_raw, df_raw = load_data(args.eval_path, 'e')
-    fl = generate_features_labels(dc_raw, df_raw, 'e.png', train_config)
-    torch.save(fl, '/Users/user/Data/fl_eval_invar')
 
     if model_train:
         # initialise weights and biases - will create a random name for the run
@@ -362,9 +176,9 @@ def main(args: argparse.Namespace) -> None:
             num_neurons=train_config.NUM_NEURONS,
             activation_fn=nn.Tanh()
         )
-        dc_raw, df_raw = load_data(args.data_path, 't')
-        fl = generate_features_labels(dc_raw, df_raw, 't', train_config)
-        train_loader, val_loader = generate_dataloaders(fl, train_config)
+        dc_raw, df_raw = preprocessing.load_data(args.data_path, 't', train_config)
+        fl = preprocessing.generate_features_labels(dc_raw, df_raw, 't', train_config)
+        train_loader, val_loader = preprocessing.generate_dataloaders(fl, train_config)
         train(network, train_loader, val_loader, config=train_config, wandb_run=run)
 
         # plotting loss history
@@ -398,9 +212,9 @@ def main(args: argparse.Namespace) -> None:
 
         if train_config.EVALUATE:
             # Evaluation on evaluative flows
-            dc_raw, df_raw = load_data(args.eval_path, 'e')
-            fl = generate_features_labels(dc_raw, df_raw, 'e.png', train_config)
-            train_loader, val_loader = generate_dataloaders(fl, train_config)
+            dc_raw, df_raw = preprocessing.load_data(args.eval_path, 'e', train_config)
+            fl = preprocessing.generate_features_labels(dc_raw, df_raw, 'e.png', train_config)
+            train_loader, val_loader = preprocessing.generate_dataloaders(fl, train_config)
 
             model_predictions = network.forward(fl[train_loader.dataset.indices, :-1].float())
             labels = fl[train_loader.dataset.indices, -1]
@@ -428,16 +242,45 @@ def main(args: argparse.Namespace) -> None:
         run.finish()
 
     else:
-        # specify and load a previously saved model
-        model_path = args.model_path
-        model_name = args.model_name
-        wandb_model = wandb.restore(name=model_name, run_path=model_path)
-        model = torch.load(wandb_model)
+        pass
 
-        # initialise network, load training data, and run training
-        dc_raw, df_raw = load_data(DATA_DIR, 't')
-        fl = generate_features_labels(dc_raw, df_raw, 't')
-        train_loader, val_loader = generate_dataloaders(fl)
+    if compare_profiles:
+        c_pt = torch.load('/Users/user/Data/changing_alpha/evaluation_flows/0.0005_data_coarse.t')
+        f_pt = torch.load('/Users/user/Data/changing_alpha/evaluation_flows/0.0005_data_fine.t')
+        fl = preprocessing.generate_features_labels(c_pt, f_pt, 't', train_config)
+
+        best_model = nn.Sequential(
+            nn.Linear(4, 96),
+            nn.Tanh(),
+            nn.Linear(96, 96),
+            nn.Tanh(),
+            nn.Linear(96, 96),
+            nn.Tanh(),
+            nn.Linear(96, 96),
+            nn.Tanh(),
+            nn.Linear(96, 1)
+        )
+
+        best_model.load_state_dict(
+            torch.load(
+                '/Users/user/Projects/PyCoarseNet/results/CLR/random_search/genial-field-24/model_genial-field-24.h5')
+        )
+
+        # run inference and correct the coarse data
+        disc_e = best_model.forward(fl[:, :-1].float())
+        corrected_c = c_pt[:, 3].unsqueeze(-1) + disc_e
+
+        # use mask to extract data along line x=0.525
+        mask1 = c_pt[:, 0] == 0.525
+        mask_indices1 = torch.nonzero(mask1)
+        corrected_c_sampled525 = corrected_c[mask_indices1].squeeze()
+        torch.save(corrected_c_sampled525, '/Users/user/Data/corrected_c_525.t')
+
+        # use mask to extract data along line x=0.475
+        mask2 = c_pt[:, 0] == 0.475
+        mask_indices2 = torch.nonzero(mask2)
+        corrected_c_sampled475 = corrected_c[mask_indices2].squeeze()
+        torch.save(corrected_c_sampled475, '/Users/user/Data/corrected_c_475.t')
 
 
 if __name__ == '__main__':

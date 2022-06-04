@@ -1,0 +1,26 @@
+program: train_model_CLR.py
+method: random
+metric:
+  name: val_mse_loss
+  goal: minimize
+parameters:
+  BATCH_SIZE:
+    distribution: int_uniform
+    min: 1
+    max: 32
+  NUM_HIDDEN_LAYERS:
+    distribution: int_uniform
+    min: 1
+    max: 8
+  NUM_NEURONS:
+    distribution: int_uniform
+    min: 4
+    max: 100
+name: CG-CFD with CLR Parameter Sweep
+command:
+  - python
+  - train_model_CLR.py
+  - --data-path=/Users/user/Data/changing_alpha
+  - --eval-path=/Users/user/Data/changing_alpha/evaluation_flows
+  - --config-path=/Users/user/Projects/PyCoarseNet/base_config.yaml
+  - --results-path=/Users/user/Projects/PyCoarseNet/results/CLR/param_sweep
