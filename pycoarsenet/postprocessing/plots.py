@@ -66,17 +66,20 @@ def plot_model_evaluation(fig_path: Path,
         Figure title.
     """
 
+    plt.rcParams["text.usetex"] = True
+
     fig = plt.figure(figsize=(16, 16))
     ax = fig.gca()
 
     ax.scatter(model_predictions, actual_error, s=100)
     ax.plot(actual_error, actual_error, 'black', label='actual_error = predicted_error')
 
-    plt.suptitle('Grid error in cell-centred T', axes=ax)
-    plt.title(title, axes=ax)
+    plt.title('Predicted error in $T$, $\hat{\\varepsilon}$, against actual error in $T$, $\\varepsilon$',
+              fontdict={'fontsize': 28})
     # plt.rcParams['font.size'] = '8'
-    plt.xlabel('Model-predicted error', axes=ax)
-    plt.ylabel('Actual error', axes=ax)
+    plt.xlabel('Model-predicted error, $\hat{\\varepsilon}$', axes=ax, fontdict={'fontsize': 26})
+    plt.ylabel('Actual error, $\\varepsilon$', axes=ax, fontdict={'fontsize': 26})
+    plt.grid()
     plt.legend()
 
     fig.savefig(fig_path)

@@ -142,6 +142,11 @@ def train(model: Network,
             results_dict = {'epoch': epoch, 'train_mse_loss': train_mse_loss, 'val_mse_loss': val_mse_loss}
             wandb_run.log(results_dict)
 
+        # early stopping
+        if val_mse_loss <= 0.00002:
+            config.N_EPOCHS = epoch + 1
+            break
+
     print('Training complete.')
 
 
@@ -160,7 +165,7 @@ def main(args: argparse.Namespace) -> None:
         # initialise weights and biases - will create a random name for the run
         run = wandb.init(
             config=train_config.config,
-            project="cg-cfd with CLR - random search",
+            project="CG-CFD",
             entity="hamzasardar"
         )
 
@@ -196,8 +201,10 @@ def main(args: argparse.Namespace) -> None:
         network.eval()
 
         # below now accesses the right datasets
-        model_predictions = network.forward(fl[val_loader.dataset.indices, :-1].float())
-        labels = fl[val_loader.dataset.indices, -1]
+        # model_predictions = network.forward(fl[val_loader.dataset.indices, :-1].float())
+        model_predictions = network.forward(fl[:, :-1].float())
+        # labels = fl[val_loader.dataset.indices, -1]
+        labels = fl[:, -1]
 
         np_model_predictions = model_predictions.detach().numpy()
         np_labels = labels.detach().numpy()
@@ -216,8 +223,10 @@ def main(args: argparse.Namespace) -> None:
             fl = preprocessing.generate_features_labels(dc_raw, df_raw, 'e.png', train_config)
             train_loader, val_loader = preprocessing.generate_dataloaders(fl, train_config)
 
-            model_predictions = network.forward(fl[train_loader.dataset.indices, :-1].float())
-            labels = fl[train_loader.dataset.indices, -1]
+            # model_predictions = network.forward(fl[train_loader.dataset.indices, :-1].float())
+            model_predictions = network.forward(fl[:, :-1].float())
+            # labels = fl[train_loader.dataset.indices, -1]
+            labels = fl[:, -1]
 
             np_model_predictions = model_predictions.detach().numpy()
             np_labels = labels.detach().numpy()
@@ -250,20 +259,26 @@ def main(args: argparse.Namespace) -> None:
         fl = preprocessing.generate_features_labels(c_pt, f_pt, 't', train_config)
 
         best_model = nn.Sequential(
-            nn.Linear(4, 96),
+            nn.Linear(4, 59),
             nn.Tanh(),
-            nn.Linear(96, 96),
+            nn.Linear(59, 59),
             nn.Tanh(),
-            nn.Linear(96, 96),
+            nn.Linear(59, 59),
             nn.Tanh(),
-            nn.Linear(96, 96),
+            nn.Linear(59, 59),
             nn.Tanh(),
-            nn.Linear(96, 1)
+            nn.Linear(59, 59),
+            nn.Tanh(),
+            nn.Linear(59, 59),
+            nn.Tanh(),
+            nn.Linear(59, 59),
+            nn.Tanh(),
+            nn.Linear(59, 1)
         )
 
         best_model.load_state_dict(
             torch.load(
-                '/Users/user/Projects/PyCoarseNet/results/CLR/random_search/genial-field-24/model_genial-field-24.h5')
+                '/Users/user/Projects/PyCoarseNet/results/CLR/report/morning-tree-169/model_morning-tree-169.h5')
         )
 
         # run inference and correct the coarse data
